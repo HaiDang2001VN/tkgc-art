@@ -1,0 +1,32 @@
+{
+    "models": {
+        "DGT": {
+            "d_model": 64,
+            "nhead": 8,
+            "num_layers": 3,
+            "intermediate_layers": {"0": 0.3, "1": 0.5, "2": 0.2}
+        },
+        "PGT": {
+            "d_model": 128,
+            "nhead": 4,
+            "num_layers": 2,
+            "current_inclusive": false
+        }
+    },
+    "training": {
+        "lr": 1e-3,
+        "batch_size": 32,
+        "num_workers": 4,
+        "k_hops": 2,
+        "num_epochs": 50
+    },
+    "data": {
+        "name": "Cora",
+        "path": "./data",
+        "random_seed": 42,
+        "split_frac": {
+            "val": 0.15,
+            "test": 0.15
+        }
+    }
+}
