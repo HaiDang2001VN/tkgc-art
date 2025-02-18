@@ -212,7 +212,7 @@ class TemporalDataset(IterableDataset):
                 'split_groups': self.split_groups
             }
         )
-
+# TODO: Fix the __iter__ method to yield batches appropriate for above setting of OGB dataset
     def __iter__(self):
         if not self.split:
             raise ValueError("Split must be specified for cloned datasets")
@@ -243,7 +243,7 @@ class TemporalDataset(IterableDataset):
                     'num_nodes': self.num_nodes
                 }
                 yield batch_data
-
+# TODO: Requires careful modifications to the get_synced_subgraphs method
     def get_synced_subgraphs(self, edge_idx, k_hops):
         graph = self.graph["edges"]["positive"]
         central_edge = graph['edge_index'][:, edge_idx]
@@ -259,7 +259,7 @@ class TemporalDataset(IterableDataset):
             'edge_time': central_time,
             'original_edge': central_edge
         }
-
+# TODO: Adjust if needed to adapt for OGB changes
     def _get_subgraph(self, central_edge, max_t, k_hops, current_inclusive):
         nodes, edges, distances, central_mask = temporal_bfs_with_distance(
             central_edge=central_edge,

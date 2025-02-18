@@ -27,6 +27,6 @@
     "data": {
         "name": "ogbl-collab",
         "path": "./data",
-        "random_seed": 42,
+        "random_seed": 42
     }
 }
