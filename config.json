@@ -4,7 +4,11 @@
             "d_model": 64,
             "nhead": 8,
             "num_layers": 3,
-            "intermediate_layers": {"0": 0.3, "1": 0.5, "2": 0.2}
+            "intermediate_layers": {
+                "0": 0.3,
+                "1": 0.5,
+                "2": 0.2
+            }
         },
         "PGT": {
             "d_model": 128,
@@ -21,12 +25,8 @@
         "num_epochs": 50
     },
     "data": {
-        "name": "Cora",
+        "name": "ogbl-collab",
         "path": "./data",
         "random_seed": 42,
-        "split_frac": {
-            "val": 0.15,
-            "test": 0.15
-        }
     }
 }
