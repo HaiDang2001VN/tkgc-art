@@ -21,6 +21,8 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
     batch_likelihood = 0.0
+    edge_scores = []
+    
     for emb, mask in zip(final_embeddings, central_masks):
         # Compute attention matrix
         attn_scores = torch.matmul(emb, emb.T) / math.sqrt(d_model)
@@ -32,12 +34,27 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
             raise ValueError(f"Expected exactly 2 central nodes, got {len(central_indices)}")
         
         i, j = central_indices
-        # Sum both directions for undirected graph
+        # Sum both directions for undirected graph (for loss calculation)
         edge_likelihood = attn_weights[i, j] + attn_weights[j, i]
         batch_likelihood += edge_likelihood
+        
+        # Calculate quantile-based edge score
+        n = attn_weights.size(0)  # Number of nodes
+        
+        # For i->j: quantile of j in i's attention distribution
+        i_to_all = attn_weights[i]
+        j_quantile_in_i = torch.sum(i_to_all <= i_to_all[j]).float() / n
+        
+        # For j->i: quantile of i in j's attention distribution
+        j_to_all = attn_weights[j]
+        i_quantile_in_j = torch.sum(j_to_all <= j_to_all[i]).float() / n
+        
+        # Average the two directional quantile scores
+        edge_quantile_score = (j_quantile_in_i + i_quantile_in_j) / 2.0
+        edge_scores.append(edge_quantile_score)
     
     avg_likelihood = batch_likelihood / len(final_embeddings)
-    return -avg_likelihood
+    return -avg_likelihood, edge_scores
 
 def adaptive_update(old_emb, new_emb, distance):
     weights = distance.unsqueeze(-1)

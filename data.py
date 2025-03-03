@@ -76,58 +76,78 @@ class TemporalDataset(IterableDataset):
             self.graph = parent_groups['graph']
             self.split_groups = parent_groups['split_groups']
 
+    def _process_split_with_neg_ratio(self, split_name, split_edges, neg_ratio):
+        """Helper function to process validation or test split with negative sampling ratio."""
+        # Get positive edges and their timestamps
+        pos_edges = split_edges[split_name]['edge']
+        pos_times = split_edges[split_name]['year']
+        
+        # Get unique timestamps from positive edges
+        unique_times = torch.unique(pos_times)
+        
+        # Cap neg_ratio if it's larger than the number of unique timestamps
+        actual_neg_ratio = min(neg_ratio, len(unique_times))
+        
+        # Get negative edges and repeat them according to actual_neg_ratio
+        neg_edges = split_edges[split_name]['edge_neg'].repeat(actual_neg_ratio, 1)
+        
+        # Generate distinct random permutations for each negative edge
+        # This ensures each negative edge gets distinct timestamps
+        all_perms = torch.stack([
+            torch.randperm(len(unique_times))[:actual_neg_ratio] 
+            for _ in range(len(split_edges[split_name]['edge_neg']))
+        ])
+        
+        # Flatten the permutation indices and use them to get timestamps
+        neg_times = unique_times[all_perms.view(-1)]
+        
+        # Combine positive and negative edges, times, and labels
+        all_edges = torch.cat([pos_edges, neg_edges], dim=0)
+        all_times = torch.cat([pos_times, neg_times])
+        all_labels = torch.cat([
+            torch.ones_like(pos_times),
+            torch.zeros_like(neg_times)
+        ])
+        
+        # Sort by time
+        sort_idx = torch.argsort(all_times)
+        
+        return all_edges, all_times, all_labels, sort_idx, len(neg_edges)
+
     def _add_temporal_info(self):
         # Get the splits' edges in form of [N, 2] tensor
         split_edges = self.data.get_idx_split()
+        
+        # Get negative sampling ratio from config
+        neg_ratio = int(self.config.get('data', {}).get('neg_ratio', 1))
 
         num_edges = {
             "train": split_edges['train']['edge'].size(0),
             "valid": split_edges['valid']['edge'].size(0),
-            "neg_valid": split_edges['valid']['edge_neg'].size(0),
+            "neg_valid": split_edges['valid']['edge_neg'].size(0) * neg_ratio,
             "test": split_edges['test']['edge'].size(0),
-            "neg_test": split_edges['test']['edge_neg'].size(0),
+            "neg_test": split_edges['test']['edge_neg'].size(0) * neg_ratio,
             "total": self.data.edge_index.size(0)
         }
 
         train_idx = torch.argsort(split_edges['train']['year'])
-
-        valid_edges = torch.cat([
-            split_edges['valid']['edge'],
-            split_edges['valid']['edge_neg']
-        ], dim=0)
-        val_neg_time = torch.randint(0, len(split_edges['valid']['year']),
-                                     (len(split_edges['valid']['edge_neg']),))
-        valid_time = torch.cat([
-            split_edges['valid']['year'],
-            split_edges['valid']['year'][val_neg_time]
-        ])
-        valid_label = torch.cat([
-            torch.ones_like(split_edges['valid']['year']),
-            torch.zeros_like(split_edges['valid']['year'][val_neg_time])
-        ])
-        valid_idx = torch.argsort(valid_time)
-
-        test_edges = torch.cat([
-            split_edges['test']['edge'],
-            split_edges['test']['edge_neg']
-        ], dim=0)
-        test_neg_time = torch.randint(0, len(split_edges['test']['year']),
-                                      (len(split_edges['test']['edge_neg']),))
-        test_time = torch.cat([
-            split_edges['test']['year'],
-            split_edges['test']['year'][test_neg_time]
-        ])
-        test_label = torch.cat([
-            torch.ones_like(split_edges['test']['year']),
-            torch.zeros_like(split_edges['test']['year'][test_neg_time])
-        ])
-        test_idx = torch.argsort(test_time)
+        
+        # Process validation set
+        valid_edges, valid_time, valid_label, valid_idx, num_neg_valid = self._process_split_with_neg_ratio(
+            'valid', split_edges, neg_ratio
+        )
+        
+        # Process test set
+        test_edges, test_time, test_label, test_idx, num_neg_test = self._process_split_with_neg_ratio(
+            'test', split_edges, neg_ratio
+        )
 
         pos_edges = torch.cat([
             split_edges['train']['edge'],
             split_edges['valid']['edge'],
             split_edges['test']['edge']
         ], dim=0)
+        
         pos_time = torch.cat([
             split_edges['train']['edge_time'],
             split_edges['valid']['year'],
@@ -145,13 +165,13 @@ class TemporalDataset(IterableDataset):
                     "edge_index": valid_edges[valid_idx].t(),
                     "edge_time": valid_time[valid_idx],
                     "edge_label": valid_label[valid_idx],
-                    "num_edges": num_edges['valid']
+                    "num_edges": num_edges['valid'] + num_neg_valid
                 },
                 "test": {
                     "edge_index": test_edges[test_idx].t(),
                     "edge_time": test_time[test_idx],
                     "edge_label": test_label[test_idx],
-                    "num_edges": num_edges['test']
+                    "num_edges": num_edges['test'] + num_neg_test
                 },
                 "positive": {
                     "edge_index": pos_edges.t(),
@@ -212,7 +232,7 @@ class TemporalDataset(IterableDataset):
                 'split_groups': self.split_groups
             }
         )
-# TODO: Fix the __iter__ method to yield batches appropriate for above setting of OGB dataset
+
     def __iter__(self):
         if not self.split:
             raise ValueError("Split must be specified for cloned datasets")
@@ -233,44 +253,77 @@ class TemporalDataset(IterableDataset):
                 local_idx = batch_idx - group['start_batch']
                 start = local_idx * self.batch_size
                 end = min(start + self.batch_size, group['num_edges'])
-
+                
+                # Get edge indices for current batch
+                batch_edge_indices = torch.arange(start, end)
+                
                 batch_data = self.get_synced_subgraphs(
-                    group['edges'][start:end],
+                    group['edge_index'][:, batch_edge_indices],
+                    group['edge_time'][batch_edge_indices],
                     self.config['training']['k_hops']
                 )
+                
+                # Add labels for validation and test splits
+                if self.split != 'train':
+                    batch_data['labels'] = group['edge_label'][batch_edge_indices]
+                
                 batch_data['meta'] = {
                     'is_group_end': is_last_in_group,
-                    'num_nodes': self.num_nodes
+                    'num_nodes': self.graph['num_nodes']
                 }
                 yield batch_data
-# TODO: Requires careful modifications to the get_synced_subgraphs method
-    def get_synced_subgraphs(self, edge_idx, k_hops):
-        graph = self.graph["edges"]["positive"]
-        central_edge = graph['edge_index'][:, edge_idx]
-        central_time = graph['edge_time'][edge_idx].item()
 
-        dgt_data = self._get_subgraph(central_edge, central_time, k_hops, True)
-        pgt_data = self._get_subgraph(
-            central_edge, central_time, k_hops, False)
-
-        return {
-            'dgt': dgt_data,
-            'pgt': pgt_data,
-            'edge_time': central_time,
-            'original_edge': central_edge
+    def get_synced_subgraphs(self, central_edges, central_times, k_hops):
+        """
+        Generate synchronized subgraphs for a batch of edges.
+        
+        Args:
+            central_edges: Tensor of shape [2, batch_size] containing source and target nodes
+            central_times: Tensor of shape [batch_size] containing edge timestamps
+            k_hops: Number of hops for neighborhood extraction
+        """
+        batch_size = central_edges.size(1)
+        batch_data = {
+            'dgt': [],
+            'pgt': [],
+            'edge_time': [],
+            'original_edge': []
         }
-# TODO: Adjust if needed to adapt for OGB changes
+        
+        for i in range(batch_size):
+            edge = central_edges[:, i:i+1]
+            time = central_times[i].item()
+            
+            dgt_data = self._get_subgraph(edge, time, k_hops, True)
+            pgt_data = self._get_subgraph(edge, time, k_hops, False)
+            
+            batch_data['dgt'].append(dgt_data)
+            batch_data['pgt'].append(pgt_data)
+            batch_data['edge_time'].append(time)
+            batch_data['original_edge'].append(edge)
+        
+        # Collate batch data
+        return {
+            'dgt': batch_data['dgt'],
+            'pgt': batch_data['pgt'],
+            'edge_time': torch.tensor(batch_data['edge_time']),
+            'original_edge': torch.cat(batch_data['original_edge'], dim=1)
+        }
+
     def _get_subgraph(self, central_edge, max_t, k_hops, current_inclusive):
+        # Get the positive edges for subgraph extraction
+        positive_edges = self.graph["edges"]["positive"]
+        
         nodes, edges, distances, central_mask = temporal_bfs_with_distance(
             central_edge=central_edge,
             max_t=max_t,
             k_hops=k_hops,
-            edge_index=self.graph['edge_index'],
-            edge_time=self.graph['edge_time'],
+            edge_index=positive_edges['edge_index'],
+            edge_time=positive_edges['edge_time'],
             current_inclusive=current_inclusive
         )
 
-        edge_pairs = self.graph['edge_index'][:, edges]
+        edge_pairs = positive_edges['edge_index'][:, edges]
         source_idx = torch.searchsorted(nodes, edge_pairs[0])
         dest_idx = torch.searchsorted(nodes, edge_pairs[1])
         local_edges = torch.stack([source_idx, dest_idx])

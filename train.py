@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader
 from data import TemporalCoraDataset
 from models import DGT, PGT, TemporalEmbeddingManager
 from loss import compute_dgt_loss, compute_pgt_loss, adaptive_update
+from ogb.linkproppred import Evaluator
+import numpy as np
 
 class SyncedGraphDataModule(L.LightningDataModule):
     def __init__(self, config):
@@ -78,40 +80,101 @@ class UnifiedTrainer(L.LightningModule):
             self.emb_manager.state_dict()
         )
 
-    def training_step(self, batch, batch_idx):
+    def step(self, batch, emb_manager=None):
+        """
+        Common processing logic for both training and validation steps
+        
+        Args:
+            batch: The input batch data
+            emb_manager: Embedding manager to use (defaults to self.emb_manager if None)
+            
+        Returns:
+            A dictionary containing losses and computed values
+        """
+        if emb_manager is None:
+            emb_manager = self.emb_manager
+        
         # Process DGT embeddings
-        dgt_loss = self._dgt_forward(batch['dgt'])
+        dgt_loss = self._dgt_forward(batch['dgt'], emb_manager)
         
         # Process PGT embeddings
-        pgt_loss = self._pgt_forward(batch['pgt'])
+        pgt_loss, pgt_scores = self._pgt_forward(batch['pgt'], emb_manager)
 
         # Handle timestamp transitions
         if batch['meta']['is_group_end']:
-            self.emb_manager.transition_timestamp()
+            emb_manager.transition_timestamp()
 
+        # Compute total loss
         total_loss = dgt_loss + pgt_loss
-        self.log_dict({
-            'train_total_loss': total_loss,
-            'train_dgt_loss': dgt_loss,
-            'train_pgt_loss': pgt_loss
-        })
-        return total_loss
+        
+        return {
+            'dgt_loss': dgt_loss,
+            'pgt_loss': pgt_loss,
+            'total_loss': total_loss,
+            'pgt_scores': pgt_scores
+        }
 
-    def _dgt_forward(self, batch):
+    def training_step(self, batch, batch_idx):
+        # Use the common step function
+        results = self.step(batch)
+        
+        # Log with train prefix
+        self.log_dict({
+            'train_total_loss': results['total_loss'],
+            'train_dgt_loss': results['dgt_loss'],
+            'train_pgt_loss': results['pgt_loss']
+        })
+        
+        return results['total_loss']
+
+    def validation_step(self, batch, batch_idx):
+        # Use the step function with validation embedding manager
+        results = self.step(batch, self.val_emb_manager)
+        
+        # Log with validation prefix
+        self.log_dict({
+            'val_total_loss': results['total_loss'],
+            'val_dgt_loss': results['dgt_loss'],
+            'val_pgt_loss': results['pgt_loss']
+        })
+        
+        # For evaluation metrics, return scores and labels
+        return {
+            'loss': results['total_loss'],
+            'pgt_scores': results['pgt_scores'],
+            'labels': batch.get('labels', None)
+        }
+
+    def _dgt_forward(self, batch, emb_manager=None):
+        if emb_manager is None:
+            emb_manager = self.emb_manager
+            
         losses = []
-        for nodes, adj, dist, mask in zip(batch['nodes'], batch['adj'], 
-                                       batch['dist'], batch['central_mask']):
-            old_emb = self.emb_manager.get_embedding(nodes)
+        for item in batch:
+            nodes = item['nodes']
+            adj = item['adj']
+            dist = item['dist']
+            mask = item['central_mask']
+            
+            # Only for training or when we know it's a positive edge
+            # During validation/test we check for labels if available
+            is_positive = True
+            if 'label' in item:
+                is_positive = item['label'] > 0
+            
+            old_emb = emb_manager.get_embedding(nodes)
             intermediate = self.dgt(old_emb.unsqueeze(1))
             
-            new_emb = adaptive_update(
-                old_emb,
-                intermediate[max(self.dgt.intermediate_layers.keys())].squeeze(1),
-                dist
-            )
-            
-            for i, node in enumerate(nodes):
-                self.emb_manager.update_embeddings(node, new_emb[i])
+            # Only update embeddings for positive items
+            if is_positive:
+                new_emb = adaptive_update(
+                    old_emb,
+                    intermediate[max(self.dgt.intermediate_layers.keys())].squeeze(1),
+                    dist
+                )
+                
+                for i, node in enumerate(nodes):
+                    emb_manager.update_embeddings(node, new_emb[i])
             
             loss = compute_dgt_loss(intermediate, adj, 
                                   self.dgt.intermediate_layers)
@@ -119,22 +182,116 @@ class UnifiedTrainer(L.LightningModule):
             
         return torch.mean(torch.stack(losses))
 
-    def _pgt_forward(self, batch):
+    def _pgt_forward(self, batch, emb_manager=None):
+        if emb_manager is None:
+            emb_manager = self.emb_manager
+            
         final_embs = []
         masks = []
-        for nodes, adj, dist, mask in zip(batch['nodes'], batch['adj'],
-                                        batch['dist'], batch['central_mask']):
-            old_emb = self.emb_manager.get_embedding(nodes)
+        labels = []  # Store labels for each item
+        
+        for item in batch:
+            nodes = item['nodes']
+            mask = item['central_mask']
+            
+            # Store label if available (for validation/test)
+            if 'label' in item:
+                labels.append(item['label'])
+            
+            old_emb = emb_manager.get_embedding(nodes)
             final_out = self.pgt(old_emb.unsqueeze(1))[-1].squeeze(1)
             final_embs.append(final_out)
-            masks.append(mask)  # Removed explicit .to(self.device)
+            masks.append(mask)
 
-        return compute_pgt_loss(final_embs, masks,
-                                self.config['models']['PGT']['d_model'])
+        # Compute PGT loss and get edge scores
+        pgt_loss, edge_scores = compute_pgt_loss(final_embs, masks, self.config['models']['PGT']['d_model'])
+        
+        # Return labels along with scores if available
+        if labels:
+            return pgt_loss, {'scores': edge_scores, 'labels': labels}
+        else:
+            return pgt_loss, {'scores': edge_scores}
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), 
                               lr=self.config['training']['lr'])
+
+    def on_validation_epoch_end(self):
+        """Calculate and log link prediction metrics using OGB evaluator"""
+        # Collect all outputs from validation steps
+        outputs = self.validation_step_outputs
+        
+        # Extract all scores and labels
+        all_scores = []
+        all_labels = []
+        
+        for output in outputs:
+            scores_dict = output['pgt_scores']
+            if 'labels' in scores_dict and scores_dict['labels'] is not None:
+                scores = scores_dict['scores']
+                labels = scores_dict['labels']
+                
+                # Extend our lists with this batch's data
+                all_scores.extend([score.item() for score in scores])
+                all_labels.extend([label.item() for label in labels])
+        
+        # Convert to numpy arrays
+        scores_np = np.array(all_scores)
+        labels_np = np.array(all_labels)
+        
+        # Separate positive and negative edges
+        pos_indices = labels_np == 1
+        neg_indices = labels_np == 0
+        
+        pos_edge_scores = scores_np[pos_indices]
+        neg_edge_scores = scores_np[neg_indices]
+        
+        # For OGB evaluator
+        y_pred_pos = torch.tensor(pos_edge_scores)
+        y_pred_neg = torch.tensor(neg_edge_scores)
+        
+        # Create evaluator input
+        input_dict = {
+            "y_pred_pos": y_pred_pos,
+            "y_pred_neg": y_pred_neg,
+        }
+        
+        # Use OGB evaluator
+        try:
+            # Get dataset name from config
+            d_name = self.config['data'].get('name', 'ogbl-collab')  # Default to collab if not specified
+            evaluator = Evaluator(name=d_name)
+            result_dict = evaluator.eval(input_dict)
+            
+            # Log results
+            for metric_name, value in result_dict.items():
+                self.log(f'val_{metric_name}', value)
+                
+            # Also calculate AUC as a common metric
+            from sklearn.metrics import roc_auc_score
+            y_true = np.concatenate([np.ones_like(pos_edge_scores), np.zeros_like(neg_edge_scores)])
+            y_pred = np.concatenate([pos_edge_scores, neg_edge_scores])
+            try:
+                auc_score = roc_auc_score(y_true, y_pred)
+                self.log('val_auc', auc_score)
+            except ValueError as e:
+                self.log('val_auc_error', -1.0)
+                print(f"Error calculating AUC: {e}")
+                
+        except Exception as e:
+            print(f"Error in evaluator: {e}")
+            # Log dummy metric to avoid failure
+            self.log('val_metric_error', -1.0)
+
+    def on_validation_epoch_start(self):
+        """Initialize validation embeddings and prepare for collection"""
+        super().on_validation_start()  # Call existing method
+        self.validation_step_outputs = []
+        
+    def validation_step_end(self, outputs):
+        """Collect validation step outputs"""
+        self.validation_step_outputs.append(outputs)
+        return outputs
 
 if __name__ == "__main__":
     import json
