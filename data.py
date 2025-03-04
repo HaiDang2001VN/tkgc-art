@@ -244,6 +244,14 @@ class TemporalDataset(IterableDataset):
         for group in self.split_groups[self.split]:
             group_batches = range(group['start_batch'], group['end_batch'])
             last_batch = group['end_batch'] - 1
+            
+            # Create a random permutation for edges within this temporal group
+            # Only shuffle for training to ensure deterministic validation/testing
+            if self.split == 'train':
+                edge_permutation = torch.randperm(group['num_edges'])
+            else:
+                # Use identity permutation for validation/test
+                edge_permutation = torch.arange(group['num_edges'])
 
             for batch_idx in group_batches:
                 if batch_idx % num_workers != worker_id:
@@ -254,8 +262,8 @@ class TemporalDataset(IterableDataset):
                 start = local_idx * self.batch_size
                 end = min(start + self.batch_size, group['num_edges'])
                 
-                # Get edge indices for current batch
-                batch_edge_indices = torch.arange(start, end)
+                # Get permuted edge indices for current batch
+                batch_edge_indices = edge_permutation[start:end]
                 
                 batch_data = self.get_synced_subgraphs(
                     group['edge_index'][:, batch_edge_indices],
