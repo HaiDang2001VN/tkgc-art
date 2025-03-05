@@ -33,9 +33,11 @@ class SyncedGraphDataModule(L.LightningDataModule):
         Called by Lightning before train/val/test steps
         This method is called on every process when using DDP
         """
+        print("Setting up datamodule...")
         if self.main_dataset is None:
             self.prepare_data()
         
+        print("Setting up for stage: ", stage)
         if stage == 'fit' or stage is None:
             # Setup for training
             if not self.train_dataset:
