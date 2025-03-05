@@ -22,23 +22,23 @@ def temporal_bfs_with_distance(central_edge, max_t, k_hops, edge_index, edge_tim
     queue = torch.tensor([[source, 0], [dest, 0]], dtype=torch.long)
 
     while queue.shape[0] > 0:
-        if not current_inclusive:
-            print(f"Queue size: {queue.shape[0]}")
-            print(f"First element: {queue[0]}")
+        # if not current_inclusive:
+        #     print(f"Queue size: {queue.shape[0]}")
+        #     print(f"First element: {queue[0]}")
         current_node, current_dist = queue[0].tolist()
         queue = queue[1:]
 
         if current_dist >= k_hops:
             continue
 
-        if not current_inclusive:
-            print(f"Edge index shape: {edge_index.shape}")
-            print(f"Edge time shape: {edge_time.shape}")
+        # if not current_inclusive:
+        #     print(f"Edge index shape: {edge_index.shape}")
+        #     print(f"Edge time shape: {edge_time.shape}")
         mask = ((edge_index[0] == current_node) |
                 (edge_index[1] == current_node)) & time_op(edge_time)
         connected_edges = torch.where(mask)[0]
-        if not current_inclusive:
-            print(f"Connected edges: {connected_edges}")
+        # if not current_inclusive:
+        #     print(f"Connected edges: {connected_edges}")
 
         for e_idx in connected_edges:
             if visited_edges[e_idx]:

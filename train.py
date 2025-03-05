@@ -204,22 +204,22 @@ class UnifiedTrainer(L.LightningModule):
             nodes = item['nodes']
             mask = item['central_mask']
             
-            print("Nodes shape: ", nodes.shape)
-            print("Nodes: ", nodes)
-            print("Mask shape: ", mask.shape)
-            print("Mask: ", mask)
+            # print("Nodes shape: ", nodes.shape)
+            # print("Nodes: ", nodes)
+            # print("Mask shape: ", mask.shape)
+            # print("Mask: ", mask)
             
             # Store label if available (for validation/test)
             if 'label' in item:
                 labels.append(item['label'])
             
             old_emb = emb_manager.get_embedding(nodes)
-            print("Old emb shape: ", old_emb.shape)
-            print("Emb: ", old_emb.unsqueeze(0).shape)
+            # print("Old emb shape: ", old_emb.shape)
+            # print("Emb: ", old_emb.unsqueeze(0).shape)
             final_out = self.pgt(old_emb.unsqueeze(0))
-            print("Final out shape: ", final_out.shape)
+            # print("Final out shape: ", final_out.shape)
             res = final_out.squeeze(0)
-            print("Final out shape: ", res.shape)
+            # print("Final out shape: ", res.shape)
             final_embs.append(res)
             masks.append(mask)
 
