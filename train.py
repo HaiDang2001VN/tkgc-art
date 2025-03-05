@@ -2,7 +2,7 @@
 import lightning as L
 import torch
 from torch.utils.data import DataLoader
-from data import TemporalCoraDataset
+from data import TemporalDataset
 from models import DGT, PGT, TemporalEmbeddingManager
 from loss import compute_dgt_loss, compute_pgt_loss, adaptive_update
 from ogb.linkproppred import Evaluator
@@ -18,29 +18,36 @@ class SyncedGraphDataModule(L.LightningDataModule):
         self.test_dataset = None
         self.num_nodes = None
 
-    def prepare_data(self):
-        self.main_dataset = TemporalCoraDataset(
+    def setup(self):
+        print("Loading dataset...")
+        self.main_dataset = TemporalDataset(
             root=self.config['data']['path'],
             config=self.config
         )
+        print("Dataset loaded.")
+        print("Number of nodes: ", self.main_dataset.num_nodes)
         self.num_nodes = self.main_dataset.num_nodes
 
     def train_dataloader(self):
+        print("Creating train dataloader...")
         if not self.train_dataset:
             self.train_dataset = self.main_dataset.clone_for_split('train')
         return self.create_dataloader(self.train_dataset)
 
     def val_dataloader(self):
+        print("Creating val dataloader...")
         if not self.val_dataset:
             self.val_dataset = self.main_dataset.clone_for_split('val')
         return self.create_dataloader(self.val_dataset)
 
     def test_dataloader(self):
+        print("Creating test dataloader...")
         if not self.test_dataset:
             self.test_dataset = self.main_dataset.clone_for_split('test')
         return self.create_dataloader(self.test_dataset)
 
     def create_dataloader(self, dataset):
+        print("Creating dataloader...")
         return DataLoader(
             dataset,
             batch_size=None,
@@ -301,8 +308,6 @@ if __name__ == "__main__":
     print("Config: ", config)
     print("Creating datamodule...")
     datamodule = SyncedGraphDataModule(config)
-    print("Preparing data...")
-    datamodule.prepare_data()
     print("Creating model...")
     model = UnifiedTrainer(config, datamodule.num_nodes)
     print("Training...")
