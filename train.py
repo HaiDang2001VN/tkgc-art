@@ -26,7 +26,7 @@ class SyncedGraphDataModule(L.LightningDataModule):
         # Initialize datasets (previously in setup)
         print("Initializing dataset splits...")
         self.train_dataset = self.main_dataset.clone_for_split('train')
-        self.val_dataset = self.main_dataset.clone_for_split('val')
+        self.val_dataset = self.main_dataset.clone_for_split('valid')
         self.test_dataset = self.main_dataset.clone_for_split('test')
         print("Dataset splits initialized.")
 
