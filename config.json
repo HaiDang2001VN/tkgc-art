@@ -22,7 +22,9 @@
         "batch_size": 32,
         "num_workers": 4,
         "k_hops": 2,
-        "num_epochs": 50
+        "num_epochs": 50,
+        "devices": 1,
+        "accelerator": "auto"
     },
     "data": {
         "name": "ogbl-collab",

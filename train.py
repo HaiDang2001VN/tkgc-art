@@ -298,14 +298,19 @@ if __name__ == "__main__":
     with open("config.json") as f:
         config = json.load(f)
         
+    print("Config: ", config)
+    print("Creating datamodule...")
     datamodule = SyncedGraphDataModule(config)
+    print("Preparing data...")
     datamodule.prepare_data()
+    print("Creating model...")
     model = UnifiedTrainer(config, datamodule.num_nodes)
-    
+    print("Training...")
     trainer = L.Trainer(
         max_epochs=config['training']['num_epochs'],
-        accelerator="auto",
-        devices=1,
+        accelerator=config['training']['accelerator'],
+        devices=config['training']['devices'],
         log_every_n_steps=5
     )
+    print("Fitting model...")
     trainer.fit(model, datamodule=datamodule)
