@@ -28,7 +28,8 @@
     },
     "data": {
         "name": "ogbl-collab",
-        "path": "./data",
-        "random_seed": 42
+        "path": "../data",
+        "random_seed": 42,
+        "edge_time": "year"
     }
 }

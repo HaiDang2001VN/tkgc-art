@@ -65,6 +65,7 @@ class TemporalDataset(IterableDataset):
         self.config = config
         self.split = split
         self.batch_size = config['training']['batch_size']
+        self.edge_time = config['data']['edge_time']
 
         if parent_groups is None:
             self.data = PygLinkPropPredDataset(
@@ -82,7 +83,7 @@ class TemporalDataset(IterableDataset):
         """Helper function to process validation or test split with negative sampling ratio."""
         # Get positive edges and their timestamps
         pos_edges = split_edges[split_name]['edge']
-        pos_times = split_edges[split_name]['year']
+        pos_times = split_edges[split_name][self.edge_time]
         
         # Get unique timestamps from positive edges
         unique_times = torch.unique(pos_times)
@@ -132,7 +133,7 @@ class TemporalDataset(IterableDataset):
             "total": self.data.edge_index.size(0)
         }
 
-        train_idx = torch.argsort(split_edges['train']['year'])
+        train_idx = torch.argsort(split_edges['train'][self.edge_time])
         
         # Process validation set
         valid_edges, valid_time, valid_label, valid_idx, num_neg_valid = self._process_split_with_neg_ratio(
@@ -151,16 +152,16 @@ class TemporalDataset(IterableDataset):
         ], dim=0)
         
         pos_time = torch.cat([
-            split_edges['train']['edge_time'],
-            split_edges['valid']['year'],
-            split_edges['test']['year']
+            split_edges['train'][self.edge_time],
+            split_edges['valid'][self.edge_time],
+            split_edges['test'][self.edge_time]
         ])
 
         return {
             "edges": {
                 "train": {
                     "edge_index": split_edges['train']['edge'][train_idx].t(),
-                    "edge_time": split_edges['train']['edge_time'][train_idx],
+                    "edge_time": split_edges['train'][self.edge_time][train_idx],
                     "num_edges": num_edges['train']
                 },
                 "valid": {
