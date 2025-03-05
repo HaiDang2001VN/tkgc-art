@@ -16,7 +16,10 @@ class DGT(nn.Module):
             encoder_layer, 
             num_layers=config['num_layers']
         )
-        self.intermediate_layers = config['intermediate_layers']
+        
+        # Read and store intermediate layers
+        intermediate_layers = config['intermediate_layers']
+        self.intermediate_layers = {int(i) for i in intermediate_layers}
         
     def forward(self, x):
         intermediate = {}
