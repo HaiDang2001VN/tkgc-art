@@ -11,7 +11,7 @@
             }
         },
         "PGT": {
-            "d_model": 128,
+            "d_model": 64,
             "nhead": 4,
             "num_layers": 2,
             "current_inclusive": false
