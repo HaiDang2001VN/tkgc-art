@@ -1,4 +1,5 @@
 from collections import defaultdict
+from tqdm import tqdm
 import torch
 from torch_geometric.utils import to_dense_adj
 from torch.utils.data import IterableDataset
@@ -189,17 +190,24 @@ class TemporalDataset(IterableDataset):
         edges = self.graph['edges']
         split_groups = {}
 
+        print("Computing split groups...")
         for split, split_edges in edges.items():
+            if split == 'positive':
+                continue
+            
+            print(f"Processing {split} split...")
             groups = defaultdict(list)
 
             for idx, edge_time in enumerate(split_edges['edge_time']):
                 groups[edge_time].append(idx)
 
+            print(f"Found {len(groups)} unique timestamps")
             sorted_groups = sorted(groups.items(), key=lambda x: x[0])
             cumulative_batches = 0
             split_group = []
 
-            for ts, edge_indices in sorted_groups:
+            print(f"Processing {len(sorted_groups)} timestamp groups...")
+            for ts, edge_indices in tqdm(sorted_groups):
                 group_size = len(edge_indices)
                 num_batches = (group_size + self.batch_size -
                                1) // self.batch_size
