@@ -70,10 +70,12 @@ class TemporalDataset(IterableDataset):
             self.data = PygLinkPropPredDataset(
                 name=config['data']['name'], root=root)
             self.graph = self._add_temporal_info()
+            self.num_nodes = self.graph['num_nodes']
             self.split_groups = self._compute_split_groups()
         else:
             self.data = parent_groups['data']
             self.graph = parent_groups['graph']
+            self.num_nodes = self.graph['num_nodes']
             self.split_groups = parent_groups['split_groups']
 
     def _process_split_with_neg_ratio(self, split_name, split_edges, neg_ratio):

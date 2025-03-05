@@ -61,12 +61,17 @@ class UnifiedTrainer(L.LightningModule):
     def __init__(self, config, num_nodes):
         super().__init__()
         self.config = config
+        print("Creating models with config: ", config)
         self.dgt = DGT(config['models']['DGT'])
         self.pgt = PGT(config['models']['PGT'])
+        print("Models created.")
+        print("Creating embedding manager with num_nodes: ", num_nodes)
+        print("node_dim = ", config['models']['DGT']['d_model'])
         self.emb_manager = TemporalEmbeddingManager(
             num_nodes=num_nodes,
             node_dim=config['models']['DGT']['d_model']
         )
+        print("Embedding manager created.")
         self.val_emb_manager = None  # Validation manager placeholder
         
         # Track original dimensions for validation copies
