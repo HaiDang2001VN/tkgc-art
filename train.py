@@ -215,9 +215,13 @@ class UnifiedTrainer(L.LightningModule):
             
             old_emb = emb_manager.get_embedding(nodes)
             print("Old emb shape: ", old_emb.shape)
-            final_out = self.pgt(old_emb.unsqueeze(1))[-1].squeeze(1)
+            print("Emb: ", old_emb.unsqueeze(1).shape)
+            final_out = self.pgt(old_emb.unsqueeze(1))
             print("Final out shape: ", final_out.shape)
-            final_embs.append(final_out)
+            print("Out Shape: ", final_out[-1])
+            res = final_out[-1].squeeze(1)
+            print("Final out shape: ", res.shape)
+            final_embs.append(res)
             masks.append(mask)
 
         # Compute PGT loss and get edge scores
