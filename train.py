@@ -28,26 +28,41 @@ class SyncedGraphDataModule(L.LightningDataModule):
         print("Number of nodes: ", self.main_dataset.num_nodes)
         self.num_nodes = self.main_dataset.num_nodes
         
-    def setup(self):
-        if self.main_data is None:
+    def setup(self, stage=None):
+        """
+        Called by Lightning before train/val/test steps
+        This method is called on every process when using DDP
+        """
+        if self.main_dataset is None:
             self.prepare_data()
+        
+        if stage == 'fit' or stage is None:
+            # Setup for training
+            if not self.train_dataset:
+                self.train_dataset = self.main_dataset.clone_for_split('train')
+            if not self.val_dataset:
+                self.val_dataset = self.main_dataset.clone_for_split('val')
+                
+        if stage == 'validate':
+            # Setup for validation only
+            if not self.val_dataset:
+                self.val_dataset = self.main_dataset.clone_for_split('val')
+                
+        if stage == 'test' or stage is None:
+            # Setup for testing
+            if not self.test_dataset:
+                self.test_dataset = self.main_dataset.clone_for_split('test')
 
     def train_dataloader(self):
         print("Creating train dataloader...")
-        if not self.train_dataset:
-            self.train_dataset = self.main_dataset.clone_for_split('train')
         return self.create_dataloader(self.train_dataset)
 
     def val_dataloader(self):
         print("Creating val dataloader...")
-        if not self.val_dataset:
-            self.val_dataset = self.main_dataset.clone_for_split('val')
         return self.create_dataloader(self.val_dataset)
 
     def test_dataloader(self):
         print("Creating test dataloader...")
-        if not self.test_dataset:
-            self.test_dataset = self.main_dataset.clone_for_split('test')
         return self.create_dataloader(self.test_dataset)
 
     def create_dataloader(self, dataset):
@@ -56,8 +71,8 @@ class SyncedGraphDataModule(L.LightningDataModule):
             dataset,
             batch_size=None,
             num_workers=self.config['training']['num_workers'],
-            persistent_workers=True,
-            pin_memory=True,
+            persistent_workers=self.config['training'].get('persistent_workers', True),
+            pin_memory=self.config['training'].get('pin_memory', True),
             shuffle=False
         )
 
