@@ -18,7 +18,7 @@ class SyncedGraphDataModule(L.LightningDataModule):
         self.test_dataset = None
         self.num_nodes = None
 
-    def setup(self):
+    def prepare_data(self):
         print("Loading dataset...")
         self.main_dataset = TemporalDataset(
             root=self.config['data']['path'],
@@ -27,6 +27,10 @@ class SyncedGraphDataModule(L.LightningDataModule):
         print("Dataset loaded.")
         print("Number of nodes: ", self.main_dataset.num_nodes)
         self.num_nodes = self.main_dataset.num_nodes
+        
+    def setup(self):
+        if self.main_data is None:
+            self.prepare_data()
 
     def train_dataloader(self):
         print("Creating train dataloader...")
@@ -313,6 +317,8 @@ if __name__ == "__main__":
     print("Config: ", config)
     print("Creating datamodule...")
     datamodule = SyncedGraphDataModule(config)
+    print("Preparing data...")
+    datamodule.prepare_data()
     print("Creating model...")
     model = UnifiedTrainer(config, datamodule.num_nodes)
     print("Training...")
