@@ -73,6 +73,8 @@ class UnifiedTrainer(L.LightningModule):
         # Track original dimensions for validation copies
         self._num_nodes = num_nodes
         self._node_dim = config['models']['DGT']['d_model']
+        self.last_layer = max(self.dgt.intermediate_layers.keys())
+        print("Last layer: ", self.last_layer)
 
     def on_train_epoch_start(self):
         """Reset embeddings at epoch start"""
@@ -173,13 +175,12 @@ class UnifiedTrainer(L.LightningModule):
             old_emb = emb_manager.get_embedding(nodes)
             print(old_emb.shape)
             intermediate = self.dgt(old_emb.unsqueeze(1))
-            print(intermediate.shape)
             
             # Only update embeddings for positive items
             if is_positive:
                 new_emb = adaptive_update(
                     old_emb,
-                    intermediate[max(self.dgt.intermediate_layers.keys())].squeeze(1),
+                    intermediate[self.last_layer].squeeze(1),
                     dist
                 )
                 

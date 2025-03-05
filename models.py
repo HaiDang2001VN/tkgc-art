@@ -19,7 +19,9 @@ class DGT(nn.Module):
         
         # Read and store intermediate layers
         intermediate_layers = config['intermediate_layers']
-        self.intermediate_layers = {int(i) for i in intermediate_layers}
+        self.intermediate_layers = {
+            int(layer): float(weight) for layer, weight in intermediate_layers.items() if weight > 0
+        }
         
     def forward(self, x):
         intermediate = {}
