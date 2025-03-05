@@ -26,9 +26,9 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
     for emb, mask in zip(final_embeddings, central_masks):
         # Compute attention matrix
         attn_scores = torch.matmul(emb, emb.T) / math.sqrt(d_model)
-        print(attn_scores.shape)
+        # print(attn_scores.shape)
         attn_weights = F.softmax(attn_scores, dim=-1)
-        print(attn_weights.shape)
+        # print(attn_weights.shape)
         
         # Get central node indices
         central_indices = torch.where(mask)[0]
@@ -36,7 +36,7 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
             raise ValueError(f"Expected exactly 2 central nodes, got {len(central_indices)}")
         
         i, j = central_indices
-        print(i, j)
+        # print(i, j)
         # Sum both directions for undirected graph (for loss calculation)
         edge_likelihood = attn_weights[i, j] + attn_weights[j, i]
         batch_likelihood += edge_likelihood
