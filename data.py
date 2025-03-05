@@ -118,7 +118,7 @@ class TemporalDataset(IterableDataset):
 
     def _add_temporal_info(self):
         # Get the splits' edges in form of [N, 2] tensor
-        split_edges = self.data.get_idx_split()
+        split_edges = self.data.get_edge_split()
         
         # Get negative sampling ratio from config
         neg_ratio = int(self.config.get('data', {}).get('neg_ratio', 1))
