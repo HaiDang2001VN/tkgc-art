@@ -12,13 +12,8 @@ class SyncedGraphDataModule(L.LightningDataModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.main_dataset = None
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
-        self.num_nodes = None
-
-    def prepare_data(self):
+        
+        # Load dataset immediately (previously in prepare_data)
         print("Loading dataset...")
         self.main_dataset = TemporalDataset(
             root=self.config['data']['path'],
@@ -28,32 +23,12 @@ class SyncedGraphDataModule(L.LightningDataModule):
         print("Number of nodes: ", self.main_dataset.num_nodes)
         self.num_nodes = self.main_dataset.num_nodes
         
-    def setup(self, stage=None):
-        """
-        Called by Lightning before train/val/test steps
-        This method is called on every process when using DDP
-        """
-        print("Setting up datamodule...")
-        if self.main_dataset is None:
-            self.prepare_data()
-        
-        print("Setting up for stage: ", stage)
-        if stage == 'fit' or stage is None:
-            # Setup for training
-            if not self.train_dataset:
-                self.train_dataset = self.main_dataset.clone_for_split('train')
-            if not self.val_dataset:
-                self.val_dataset = self.main_dataset.clone_for_split('val')
-                
-        if stage == 'validate':
-            # Setup for validation only
-            if not self.val_dataset:
-                self.val_dataset = self.main_dataset.clone_for_split('val')
-                
-        if stage == 'test' or stage is None:
-            # Setup for testing
-            if not self.test_dataset:
-                self.test_dataset = self.main_dataset.clone_for_split('test')
+        # Initialize datasets (previously in setup)
+        print("Initializing dataset splits...")
+        self.train_dataset = self.main_dataset.clone_for_split('train')
+        self.val_dataset = self.main_dataset.clone_for_split('val')
+        self.test_dataset = self.main_dataset.clone_for_split('test')
+        print("Dataset splits initialized.")
 
     def train_dataloader(self):
         print("Creating train dataloader...")
