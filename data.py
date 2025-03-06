@@ -366,6 +366,23 @@ class TemporalDataset(IterableDataset):
 
         adj = to_dense_adj(local_edges, max_num_nodes=len(nodes))[0]
 
+        # Debug for empty adjacency matrices
+        if adj.sum() == 0:
+            print("=" * 50)
+            print("WARNING: Empty adjacency matrix detected")
+            print(f"Max timestamp: {max_t}")
+            print(f"Number of nodes: {len(nodes)}")
+            print(f"Number of edges before conversion: {len(edges)}")
+            print(f"Local edges shape: {local_edges.shape}")
+            if local_edges.numel() > 0:
+                print(f"First 5 local edges: {local_edges[:, :min(5, local_edges.shape[1])].tolist()}")
+            print(f"Original central edge: {central_edge.tolist()}")
+            print(f"Source idx: {source_idx.shape}, Dest idx: {dest_idx.shape}")
+            if source_idx.numel() > 0:
+                matching_indices = (source_idx < len(nodes)) & (dest_idx < len(nodes))
+                print(f"Valid indices: {matching_indices.sum()}/{len(matching_indices)}")
+            print("=" * 50)
+
         return {
             'nodes': nodes,
             'adj': adj,
