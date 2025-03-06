@@ -184,13 +184,13 @@ class UnifiedTrainer(L.LightningModule):
                 is_positive = item['label'] > 0
             
             old_emb = emb_manager.get_embedding(nodes)
-            intermediate = self.dgt(old_emb.unsqueeze(1))
+            intermediate = self.dgt(old_emb.unsqueeze(0))
             
             # Only update embeddings for positive items
             if is_positive:
                 new_emb = adaptive_update(
                     old_emb,
-                    intermediate[self.last_layer].squeeze(1),
+                    intermediate[self.last_layer].squeeze(0),
                     dist
                 )
                 
