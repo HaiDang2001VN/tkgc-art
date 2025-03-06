@@ -207,7 +207,8 @@ class TemporalDataset(IterableDataset):
             groups = defaultdict(list)
 
             for idx, edge_time in enumerate(split_edges['edge_time']):
-                groups[edge_time].append(idx)
+                # Convert the tensor to a Python int before using as dictionary key
+                groups[edge_time.item()].append(idx)
 
             print(f"Found {len(groups)} unique timestamps")
             print("Top 5 unique timestamps: ", list(groups.keys())[:5])
