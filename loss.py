@@ -20,9 +20,9 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
         masked = attn * adj_matrix
         # print("masked", masked.shape)
         layer_loss = -masked.sum() / adj_matrix.sum()
-        print("layer_loss", layer_loss)
+        # print("layer_loss", layer_loss)
         total_loss += (weight / total_weight) * layer_loss
-        print("total_loss", total_loss)
+        # print("total_loss", total_loss)
         
     return total_loss
 
