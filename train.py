@@ -313,6 +313,20 @@ class UnifiedTrainer(L.LightningModule):
         self.validation_step_outputs.append(outputs)
         return outputs
 
+    def on_train_start(self):
+        """
+        Ensure all components are on the correct device.
+        This is called by Lightning right before training begins.
+        """
+        # Move embedding manager to the same device as the model
+        self.emb_manager.to(self.device)
+        
+        # Log device information for debugging
+        print(f"Training on device: {self.device}")
+        print(f"DGT is on device: {next(self.dgt.parameters()).device}")
+        print(f"PGT is on device: {next(self.pgt.parameters()).device}")
+        print(f"Embedding manager moved to device: {self.device}")
+
 if __name__ == "__main__":
     import json
     with open("config.json") as f:
