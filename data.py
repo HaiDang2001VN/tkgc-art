@@ -363,3 +363,16 @@ class TemporalDataset(IterableDataset):
             'dist': torch.exp(-distances.float().pow(2)),
             'central_mask': central_mask
         }
+
+    def __len__(self):
+        """Return the length of the dataset in batches"""
+        if not self.split or self.split not in self.split_groups:
+            return 0
+            
+        # Get the last group of this split which contains the total batches
+        groups = self.split_groups[self.split]
+        if not groups:
+            return 0
+            
+        last_group = groups[-1]
+        return last_group['end_batch']

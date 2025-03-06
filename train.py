@@ -32,15 +32,21 @@ class SyncedGraphDataModule(L.LightningDataModule):
 
     def train_dataloader(self):
         print("Creating train dataloader...")
-        return self.create_dataloader(self.train_dataset)
+        loader = self.create_dataloader(self.train_dataset)
+        print(f"Train dataloader created with {len(self.train_dataset)} batches")
+        return loader
 
     def val_dataloader(self):
         print("Creating val dataloader...")
-        return self.create_dataloader(self.val_dataset)
+        loader = self.create_dataloader(self.val_dataset)
+        print(f"Validation dataloader created with {len(self.val_dataset)} batches")
+        return loader
 
     def test_dataloader(self):
         print("Creating test dataloader...")
-        return self.create_dataloader(self.test_dataset)
+        loader = self.create_dataloader(self.test_dataset)
+        print(f"Test dataloader created with {len(self.test_dataset)} batches")
+        return loader
 
     def create_dataloader(self, dataset):
         print("Creating dataloader...")
