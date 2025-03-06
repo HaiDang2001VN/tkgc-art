@@ -81,7 +81,11 @@ class UnifiedTrainer(L.LightningModule):
         self.emb_manager.reset()
 
     def on_validation_start(self):
-        """Initialize validation embeddings from current state"""
+        """Called by Lightning before validation begins"""
+        self.on_start()
+        print("Starting validation phase")
+        
+        # Create validation embedding manager
         self.val_emb_manager = TemporalEmbeddingManager(
             self._num_nodes,
             self._node_dim
@@ -89,6 +93,7 @@ class UnifiedTrainer(L.LightningModule):
         self.val_emb_manager.load_state_dict(
             self.emb_manager.state_dict()
         )
+        self.val_emb_manager.to(self.device)
 
     def step(self, batch, emb_manager=None):
         """
@@ -304,28 +309,50 @@ class UnifiedTrainer(L.LightningModule):
             self.log('val_metric_error', -1.0)
 
     def on_validation_epoch_start(self):
-        """Initialize validation embeddings and prepare for collection"""
-        super().on_validation_start()  # Call existing method
+        """Initialize collection for validation outputs"""
+        # Fix: Don't call parent method that doesn't exist
+        # super().on_validation_start()  # This was incorrect
         self.validation_step_outputs = []
-        
+
     def validation_step_end(self, outputs):
         """Collect validation step outputs"""
         self.validation_step_outputs.append(outputs)
         return outputs
 
-    def on_train_start(self):
+    def on_start(self):
         """
-        Ensure all components are on the correct device.
-        This is called by Lightning right before training begins.
+        Common setup code for all start hooks.
+        This ensures components are on the correct device.
         """
         # Move embedding manager to the same device as the model
         self.emb_manager.to(self.device)
         
         # Log device information for debugging
-        print(f"Training on device: {self.device}")
+        print(f"Components running on device: {self.device}")
         print(f"DGT is on device: {next(self.dgt.parameters()).device}")
         print(f"PGT is on device: {next(self.pgt.parameters()).device}")
         print(f"Embedding manager moved to device: {self.device}")
+
+    def on_train_start(self):
+        """Called by Lightning before training begins"""
+        self.on_start()
+        print("Starting training phase")
+
+    def on_test_start(self):
+        """Called by Lightning before test begins"""
+        self.on_start()
+        print("Starting test phase")
+        
+        # Similar to validation, create test embedding manager if needed
+        self.val_emb_manager = TemporalEmbeddingManager(
+            self._num_nodes,
+            self._node_dim
+        )
+        self.val_emb_manager.load_state_dict(
+            self.emb_manager.state_dict()
+        )
+        self.val_emb_manager.to(self.device)
+
 
 if __name__ == "__main__":
     import json
