@@ -183,8 +183,8 @@ class UnifiedTrainer(L.LightningModule):
             if 'label' in item:
                 is_positive = item['label'] > 0
             
-            print("Nodes shape: ", nodes.shape)
-            print("Adj shape: ", adj.shape)
+            # print("Nodes shape: ", nodes.shape)
+            # print("Adj shape: ", adj.shape)
             old_emb = emb_manager.get_embedding(nodes)
             print("Old emb shape: ", old_emb.shape)
             intermediate = self.dgt(old_emb.unsqueeze(0))
@@ -202,6 +202,7 @@ class UnifiedTrainer(L.LightningModule):
             
             loss = compute_dgt_loss(intermediate, adj, 
                                   self.dgt.intermediate_layers)
+            print("Loss: ", loss.item())
             losses.append(loss)
             
         return torch.mean(torch.stack(losses))
