@@ -183,7 +183,10 @@ class UnifiedTrainer(L.LightningModule):
             if 'label' in item:
                 is_positive = item['label'] > 0
             
+            print("Nodes shape: ", nodes.shape)
+            print("Adj shape: ", adj.shape)
             old_emb = emb_manager.get_embedding(nodes)
+            print("Old emb shape: ", old_emb.shape)
             intermediate = self.dgt(old_emb.unsqueeze(0))
             
             # Only update embeddings for positive items
