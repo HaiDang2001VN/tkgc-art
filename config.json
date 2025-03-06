@@ -13,16 +13,16 @@
         "PGT": {
             "d_model": 64,
             "nhead": 4,
-            "num_layers": 2,
+            "num_layers": 1,
             "current_inclusive": false
         }
     },
     "training": {
         "lr": 0.001,
-        "batch_size": 32,
-        "num_workers": 4,
+        "batch_size": 64,
+        "num_workers": 8,
         "k_hops": 2,
-        "num_epochs": 100,
+        "num_epochs": 3,
         "devices": "auto",
         "accelerator": "auto",
         "persistent_workers": true,
