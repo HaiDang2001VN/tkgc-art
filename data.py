@@ -241,7 +241,6 @@ class TemporalDataset(IterableDataset):
             split_groups[split] = split_group
             print("=" * 20 + "Split group information" + "=" * 20)
             print(f"Split: {split}")
-            print(f"Number of batches: {len(split_group)}")
             print(f"Number of edges: {cumulative_batches * self.batch_size}")
             print(f"Number of unique timestamps: {len(groups)}")
             print("Cummulative batches: ", cumulative_batches)
@@ -327,6 +326,7 @@ class TemporalDataset(IterableDataset):
         }
         
         for i in range(batch_size):
+            print(f"Processing edge {i+1}/{batch_size}: {central_edges[0, i].item()} -> {central_edges[1, i].item()}")
             edge = central_edges[:, i:i+1]
             time = central_times[i].item()
             
