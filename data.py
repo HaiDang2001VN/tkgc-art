@@ -359,6 +359,12 @@ class TemporalDataset(IterableDataset):
             current_inclusive=current_inclusive
         )
 
+        # Sort nodes and rearrange related tensors accordingly
+        sort_indices = torch.argsort(nodes)
+        nodes = nodes[sort_indices]
+        distances = distances[sort_indices]
+        central_mask = central_mask[sort_indices]
+
         edge_pairs = positive_edges['edge_index'][:, edges]
         source_idx = torch.searchsorted(nodes, edge_pairs[0])
         dest_idx = torch.searchsorted(nodes, edge_pairs[1])
