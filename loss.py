@@ -13,7 +13,10 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
             math.sqrt(embeddings.size(-1)), 
             dim=-1
         )
+        print("attn", attn.shape)
+        print("adj_matrix", adj_matrix.shape)
         masked = attn * adj_matrix
+        print("masked", masked.shape)
         layer_loss = -masked.sum() / adj_matrix.sum()
         total_loss += (weight / total_weight) * layer_loss
         

@@ -326,7 +326,7 @@ class TemporalDataset(IterableDataset):
         }
         
         for i in range(batch_size):
-            print(f"Processing edge {i+1}/{batch_size}: {central_edges[0, i].item()} -> {central_edges[1, i].item()}")
+            # print(f"Processing edge {i+1}/{batch_size}: {central_edges[0, i].item()} -> {central_edges[1, i].item()}")
             edge = central_edges[:, i:i+1]
             time = central_times[i].item()
             
@@ -374,7 +374,7 @@ class TemporalDataset(IterableDataset):
         }
 
     def __len__(self):
-        """Return the length of the dataset in batches"""
+        """Return the length of the dataset in batches, accounting for worker distribution"""
         if not self.split or self.split not in self.split_groups:
             return 0
             
@@ -384,4 +384,14 @@ class TemporalDataset(IterableDataset):
             return 0
             
         last_group = groups[-1]
-        return last_group['end_batch']
+        total_batches = last_group['end_batch']
+        
+        # Account for worker distribution
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is not None:
+            # If we're in a worker process, only count batches this worker will process
+            num_workers = worker_info.num_workers
+            worker_id = worker_info.id
+            return (total_batches + num_workers - 1 - worker_id) // num_workers
+        
+        return total_batches
