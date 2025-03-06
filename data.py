@@ -372,8 +372,8 @@ class TemporalDataset(IterableDataset):
 
         adj = to_dense_adj(local_edges, max_num_nodes=len(nodes))[0]
 
-        # Debug for empty adjacency matrices
-        if adj.sum() == 0:
+        # Debug for empty adjacency matrices but more than 2 central nodes
+        if adj.sum() == 0 and len(nodes) > 2:
             print("=" * 50)
             print("WARNING: Empty adjacency matrix detected")
             print(f"Max timestamp: {max_t}")

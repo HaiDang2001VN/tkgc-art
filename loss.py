@@ -17,22 +17,29 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
         )
         
         masked = attn * adj_matrix
-        layer_loss = -masked.sum() / adj_matrix.sum()
+        
+        # Handle division by zero (no edges)
+        if adj_matrix.sum() == 0:
+            layer_loss = torch.tensor(0.0)
+            # Error when more than 2 nodes
+            if adj_matrix.size(0) > 2:
+                print("embeddings", embeddings.shape)
+                print("temp", temp.shape)
+                print("attn", attn.shape)
+                print("adj_matrix", adj_matrix.shape)
+                print("masked", masked.shape)
+                print("layer_loss", layer_loss)
+                print("total_loss", total_loss)
+                print("total_weight", total_weight)
+                print("weight", weight)
+                print("masked.sum()", masked.sum())
+                print("adj_matrix.sum()", adj_matrix.sum())
+                print("masked.sum() / adj_matrix.sum()",
+                    masked.sum() / adj_matrix.sum())
+                raise ValueError("Division by zero")
+        else:
+            layer_loss = -masked.sum() / adj_matrix.sum()
         total_loss += (weight / total_weight) * layer_loss
-        if torch.isnan(total_loss):
-            print("embeddings", embeddings.shape)
-            print("temp", temp.shape)
-            print("attn", attn.shape)
-            print("adj_matrix", adj_matrix.shape)
-            print("masked", masked.shape)
-            print("layer_loss", layer_loss)
-            print("total_loss", total_loss)
-            print("total_weight", total_weight)
-            print("weight", weight)
-            print("masked.sum()", masked.sum())
-            print("adj_matrix.sum()", adj_matrix.sum())
-            print("masked.sum() / adj_matrix.sum()", masked.sum() / adj_matrix.sum())
-            raise ValueError("NaN loss encountered")
         
     return total_loss
 
