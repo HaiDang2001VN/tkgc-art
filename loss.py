@@ -8,21 +8,31 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
     
     for layer_idx, weight in layer_weights.items():
         embeddings = intermediate_outputs[layer_idx]
-        print("embeddings", embeddings.shape)
+        
         temp = torch.matmul(embeddings, embeddings.transpose(-2, -1))
-        print("temp", temp.shape)
+        
         attn = F.softmax(
             temp / math.sqrt(embeddings.size(-1)), 
             dim=-1
         )
-        print("attn", attn.shape)
-        print("adj_matrix", adj_matrix.shape)
+        
         masked = attn * adj_matrix
-        print("masked", masked.shape)
         layer_loss = -masked.sum() / adj_matrix.sum()
-        print("layer_loss", layer_loss)
         total_loss += (weight / total_weight) * layer_loss
-        print("total_loss", total_loss)
+        if torch.isnan(total_loss):
+            print("embeddings", embeddings.shape)
+            print("temp", temp.shape)
+            print("attn", attn.shape)
+            print("adj_matrix", adj_matrix.shape)
+            print("masked", masked.shape)
+            print("layer_loss", layer_loss)
+            print("total_loss", total_loss)
+            print("total_weight", total_weight)
+            print("weight", weight)
+            print("masked.sum()", masked.sum())
+            print("adj_matrix.sum()", adj_matrix.sum())
+            print("masked.sum() / adj_matrix.sum()", masked.sum() / adj_matrix.sum())
+            raise ValueError("NaN loss encountered")
         
     return total_loss
 
