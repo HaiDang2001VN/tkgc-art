@@ -373,8 +373,10 @@ class TemporalDataset(IterableDataset):
             print(f"Max timestamp: {max_t}")
             print(f"Number of nodes: {len(nodes)}")
             print(f"Number of edges before conversion: {len(edges)}")
+            print(f"Edge pairs shape: {edge_pairs.shape}")
             print(f"Local edges shape: {local_edges.shape}")
             if local_edges.numel() > 0:
+                print(f"Original edge pairs: {edge_pairs[:, :min(5, edge_pairs.shape[1])].tolist()}")
                 print(f"First 5 local edges: {local_edges[:, :min(5, local_edges.shape[1])].tolist()}")
             print(f"Original central edge: {central_edge.tolist()}")
             print(f"Source idx: {source_idx.shape}, Dest idx: {dest_idx.shape}")
