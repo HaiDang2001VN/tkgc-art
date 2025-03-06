@@ -202,7 +202,7 @@ class UnifiedTrainer(L.LightningModule):
             
             loss = compute_dgt_loss(intermediate, adj, 
                                   self.dgt.intermediate_layers)
-            print("Loss: ", loss.item())
+            # print("Loss: ", loss.item())
             losses.append(loss)
             
         return torch.mean(torch.stack(losses))
