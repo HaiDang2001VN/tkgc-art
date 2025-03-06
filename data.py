@@ -210,6 +210,7 @@ class TemporalDataset(IterableDataset):
                 groups[edge_time].append(idx)
 
             print(f"Found {len(groups)} unique timestamps")
+            print("Top 5 unique timestamps: ", list(groups.keys())[:5])
             sorted_groups = sorted(groups.items(), key=lambda x: x[0])
             cumulative_batches = 0
             split_group = []
@@ -237,6 +238,13 @@ class TemporalDataset(IterableDataset):
                 cumulative_batches += num_batches
 
             split_groups[split] = split_group
+            print("=" * 20 + "Split group information" + "=" * 20)
+            print(f"Split: {split}")
+            print(f"Number of batches: {len(split_group)}")
+            print(f"Number of edges: {cumulative_batches * self.batch_size}")
+            print(f"Number of unique timestamps: {len(groups)}")
+            print("Cummulative batches: ", cumulative_batches)
+            print("=" * 50)
 
         return split_groups
 
