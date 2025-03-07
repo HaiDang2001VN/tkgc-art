@@ -1,9 +1,72 @@
-from collections import defaultdict, deque
+from collections import defaultdict
 from tqdm import tqdm
 import torch
 from torch_geometric.utils import to_dense_adj
 from torch.utils.data import IterableDataset
 from ogb.linkproppred import PygLinkPropPredDataset
+
+
+def temporal_bfs_with_distance(central_edge, max_t, k_hops, edge_index, edge_time, current_inclusive):
+    time_op = (lambda x: x <= max_t) if current_inclusive else (
+        lambda x: x < max_t)
+
+    visited_nodes = torch.zeros(edge_index.max().item() + 1, dtype=torch.bool)
+    visited_edges = torch.zeros_like(edge_time, dtype=torch.bool)
+
+    source, dest = central_edge[0].item(), central_edge[1].item()
+    nodes = torch.tensor([source, dest], dtype=torch.long)
+    distances = torch.tensor([0, 0], dtype=torch.long)
+    visited_nodes[source] = True
+    visited_nodes[dest] = True
+
+    queue = torch.tensor([[source, 0], [dest, 0]], dtype=torch.long)
+
+    while queue.shape[0] > 0:
+        # if not current_inclusive:
+        #     print(f"Queue size: {queue.shape[0]}")
+        #     print(f"First element: {queue[0]}")
+        current_node, current_dist = queue[0].tolist()
+        queue = queue[1:]
+
+        if current_dist >= k_hops:
+            continue
+
+        # if not current_inclusive:
+        #     print(f"Edge index shape: {edge_index.shape}")
+        #     print(f"Edge time shape: {edge_time.shape}")
+        mask = ((edge_index[0] == current_node) |
+                (edge_index[1] == current_node)) & time_op(edge_time)
+        connected_edges = torch.where(mask)[0]
+        # if not current_inclusive:
+        #     print(f"Connected edges: {connected_edges}")
+
+        for e_idx in connected_edges:
+            if visited_edges[e_idx]:
+                continue
+            visited_edges[e_idx] = True
+
+            u, v = edge_index[:, e_idx].tolist()
+            neighbor = v if u == current_node else u
+
+            if not visited_nodes[neighbor]:
+                visited_nodes[neighbor] = True
+                nodes = torch.cat([nodes, torch.tensor([neighbor])])
+                distances = torch.cat(
+                    [distances, torch.tensor([current_dist + 1])])
+                queue = torch.cat(
+                    [queue, torch.tensor([[neighbor, current_dist + 1]])])
+
+    central_mask = (nodes == source) | (nodes == dest)
+    if central_mask.sum().item() != 2:
+        raise RuntimeError(
+            f"Central mask invalid, expected 2 True values got {central_mask.sum().item()}")
+
+    return (
+        nodes,
+        torch.where(visited_edges)[0],
+        distances,
+        central_mask
+    )
 
 
 class TemporalDataset(IterableDataset):
@@ -19,105 +82,11 @@ class TemporalDataset(IterableDataset):
             self.graph = self._add_temporal_info()
             self.num_nodes = self.graph['num_nodes']
             self.split_groups = self._compute_split_groups()
-            
-            # Build optimized graph representation
-            print("Building optimized temporal graph representation...")
-            self._build_temporal_adjacency()
         else:
             self.data = parent_groups['data']
             self.graph = parent_groups['graph']
             self.num_nodes = self.graph['num_nodes']
             self.split_groups = parent_groups['split_groups']
-            self.adj_list = parent_groups.get('adj_list')  # Share precomputed adjacency lists
-    
-    def _build_temporal_adjacency(self):
-        """
-        Build time-sorted adjacency lists for efficient traversal
-        
-        Note: This structure is shared between workers and should not be modified
-        after initialization.
-        """
-        positive_edges = self.graph["edges"]["positive"]
-        edge_index = positive_edges['edge_index']
-        edge_time = positive_edges['edge_time']
-        
-        # Create adjacency list for each node
-        self.adj_list = [[] for _ in range(self.num_nodes)]
-        
-        # Process all edges
-        for i in range(edge_index.size(1)):
-            src, dst = edge_index[0, i].item(), edge_index[1, i].item()
-            t = edge_time[i].item()
-            
-            # Store (neighbor, time, edge_idx) tuples
-            self.adj_list[src].append((dst, t, i))
-            self.adj_list[dst].append((src, t, i))  # For undirected graphs
-        
-        # Sort each list by timestamp for early termination
-        for i in range(self.num_nodes):
-            self.adj_list[i].sort(key=lambda x: x[1])  # Sort by timestamp
-    
-    def temporal_bfs(self, central_edge, max_t, k_hops, current_inclusive):
-        """Optimized BFS with early termination on time constraint"""
-        source, dest = central_edge[0].item(), central_edge[1].item()
-        
-        # Add validation for source and dest nodes
-        if source >= self.num_nodes or dest >= self.num_nodes:
-            print(f"WARNING: Edge {source}->{dest} contains node outside graph range (0-{self.num_nodes-1})")
-            # Return minimal valid result
-            nodes = torch.tensor([source, dest], dtype=torch.long)
-            edges = torch.tensor([], dtype=torch.long)
-            distances = torch.tensor([0, 0], dtype=torch.long)
-            central_mask = torch.tensor([True, True])
-            return nodes, edges, distances, central_mask
-        
-        # Define time comparison operator
-        time_op = (lambda x: x <= max_t) if current_inclusive else (lambda x: x < max_t)
-        
-        # Use efficient data structures for BFS
-        visited_nodes = set([source, dest])
-        visited_edges = set()
-        node_distances = {source: 0, dest: 0}
-        queue = deque([(source, 0), (dest, 0)])
-        
-        while queue:
-            current_node, current_dist = queue.popleft()
-            
-            if current_dist >= k_hops:
-                continue
-                
-            # Process edges in time-sorted order with early termination
-            for neighbor, t, edge_idx in self.adj_list[current_node]:
-                # Early termination: break as soon as we exceed the max timestamp
-                if not time_op(t):
-                    break  # Since edges are sorted by time, all remaining edges will also fail
-                
-                if edge_idx in visited_edges:
-                    continue
-                    
-                visited_edges.add(edge_idx)
-                
-                if neighbor not in visited_nodes:
-                    visited_nodes.add(neighbor)
-                    node_distances[neighbor] = current_dist + 1
-                    queue.append((neighbor, current_dist + 1))
-        
-        # More efficient tensor creation with pre-allocated lists
-        nodes_list = list(visited_nodes)
-        edges_list = list(visited_edges)
-        
-        # Convert to tensors efficiently
-        nodes = torch.tensor(nodes_list, dtype=torch.long)
-        edges = torch.tensor(edges_list, dtype=torch.long)
-        
-        # More efficient distance calculation
-        distances = torch.zeros(len(nodes), dtype=torch.long)
-        for i, n in enumerate(nodes):
-            distances[i] = node_distances[n.item()]
-        
-        central_mask = (nodes == source) | (nodes == dest)
-        
-        return nodes, edges, distances, central_mask
 
     def _process_split_with_neg_ratio(self, split_name, split_edges, neg_ratio):
         """Helper function to process validation or test split with negative sampling ratio."""
@@ -238,9 +207,8 @@ class TemporalDataset(IterableDataset):
             groups = defaultdict(list)
 
             for idx, edge_time in enumerate(split_edges['edge_time']):
-                # Ensure we have a plain Python int for dictionary keys
-                time_key = int(edge_time.item())  # Convert to Python int explicitly
-                groups[time_key].append(idx)
+                # Convert the tensor to a Python int before using as dictionary key
+                groups[edge_time.item()].append(idx)
 
             print(f"Found {len(groups)} unique timestamps")
             print("Top 5 unique timestamps: ", list(groups.keys())[:5])
@@ -281,11 +249,6 @@ class TemporalDataset(IterableDataset):
         return split_groups
 
     def clone_for_split(self, split):
-        # Check if adj_list exists before sharing it
-        if not hasattr(self, 'adj_list') or self.adj_list is None:
-            print("WARNING: Adjacency list not built yet, building now...")
-            self._build_temporal_adjacency()
-            
         return TemporalDataset(
             root=self.config['data']['path'],
             config=self.config,
@@ -293,8 +256,7 @@ class TemporalDataset(IterableDataset):
             parent_groups={
                 'data': self.data,
                 'graph': self.graph,
-                'split_groups': self.split_groups,
-                'adj_list': self.adj_list  # Now safely shared
+                'split_groups': self.split_groups
             }
         )
 
@@ -385,34 +347,32 @@ class TemporalDataset(IterableDataset):
         }
 
     def _get_subgraph(self, central_edge, max_t, k_hops, current_inclusive):
-        """Extract subgraph using the optimized BFS"""
-        # Directly use the member method instead of the external function
-        nodes, edges, distances, central_mask = self.temporal_bfs(
+        # Get the positive edges for subgraph extraction
+        positive_edges = self.graph["edges"]["positive"]
+        
+        nodes, edges, distances, central_mask = temporal_bfs_with_distance(
             central_edge=central_edge,
             max_t=max_t,
             k_hops=k_hops,
+            edge_index=positive_edges['edge_index'],
+            edge_time=positive_edges['edge_time'],
             current_inclusive=current_inclusive
         )
 
-        # Sort nodes for searchsorted operations
+        # Sort nodes and rearrange related tensors accordingly
         sort_indices = torch.argsort(nodes)
         nodes = nodes[sort_indices]
         distances = distances[sort_indices]
         central_mask = central_mask[sort_indices]
 
-        # Get original edge pairs
-        positive_edges = self.graph["edges"]["positive"]
         edge_pairs = positive_edges['edge_index'][:, edges]
-        
-        # Map to local indices
         source_idx = torch.searchsorted(nodes, edge_pairs[0])
         dest_idx = torch.searchsorted(nodes, edge_pairs[1])
         local_edges = torch.stack([source_idx, dest_idx])
 
-        # Create adjacency matrix
         adj = to_dense_adj(local_edges, max_num_nodes=len(nodes))[0]
 
-        # Debug for empty adjacency matrices (keeping your original debugging logic)
+        # Debug for empty adjacency matrices but more than 2 central nodes
         if adj.sum() == 0 and len(nodes) > 2:
             print("=" * 50)
             print("WARNING: Empty adjacency matrix detected")
