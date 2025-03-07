@@ -19,8 +19,8 @@
     },
     "training": {
         "lr": 0.001,
-        "batch_size": 4,
-        "num_workers": 2,
+        "batch_size": 64,
+        "num_workers": 8,
         "k_hops": 2,
         "num_epochs": 3,
         "devices": "auto",
