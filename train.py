@@ -352,16 +352,6 @@ class UnifiedTrainer(L.LightningModule):
         """Called by Lightning before test begins"""
         self.on_start()
         print("Starting test phase")
-        
-        # Similar to validation, create test embedding manager if needed
-        self.val_emb_manager = TemporalEmbeddingManager(
-            self._num_nodes,
-            self._node_dim
-        )
-        self.val_emb_manager.load_state_dict(
-            self.emb_manager.state_dict()
-        )
-        self.val_emb_manager.to(self.device)
 
 
 if __name__ == "__main__":
