@@ -371,7 +371,7 @@ class UnifiedTrainer(L.LightningModule):
         # Log device information for debugging
         print(f"Components running on device: {self.device}")
         print(f"DGT is on device: {next(self.dgt.parameters()).device}")
-        if self.pgt is not None:
+        if self.predictive:
             print(f"PGT is on device: {next(self.pgt.parameters()).device}")
         print(f"Embedding manager moved to device: {self.device}")
 
