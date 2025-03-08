@@ -147,11 +147,15 @@ class UnifiedTrainer(L.LightningModule):
         # Use the common step function
         results = self.step(batch)
         
+        # Extract timestamp from batch (mean of all edge timestamps in batch)
+        batch_timestamp = batch['edge_time'].float().mean().item()
+        
         # Log with train prefix
         self.log_dict({
             'train_total_loss': results['total_loss'],
             'train_dgt_loss': results['dgt_loss'],
-            'train_pgt_loss': results['pgt_loss']
+            'train_pgt_loss': results['pgt_loss'],
+            'train_timestamp': batch_timestamp  # Add timestamp logging
         }, prog_bar=True, sync_dist=True, batch_size=self.config['training']['batch_size'])
         
         return results['total_loss']
@@ -160,11 +164,15 @@ class UnifiedTrainer(L.LightningModule):
         # Use the step function with validation embedding manager
         results = self.step(batch, self.val_emb_manager)
         
+        # Extract timestamp from batch (mean of all edge timestamps in batch)
+        batch_timestamp = batch['edge_time'].float().mean().item()
+        
         # Log with validation prefix
         self.log_dict({
             'val_total_loss': results['total_loss'],
             'val_dgt_loss': results['dgt_loss'],
-            'val_pgt_loss': results['pgt_loss']
+            'val_pgt_loss': results['pgt_loss'],
+            'val_timestamp': batch_timestamp  # Add timestamp logging
         }, prog_bar=True, sync_dist=True, batch_size=self.config['training']['batch_size'])
         
         # For evaluation metrics, return scores and labels
