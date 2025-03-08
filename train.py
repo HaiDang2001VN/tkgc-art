@@ -144,7 +144,7 @@ class UnifiedTrainer(L.LightningModule):
             'train_total_loss': results['total_loss'],
             'train_dgt_loss': results['dgt_loss'],
             'train_pgt_loss': results['pgt_loss']
-        })
+        }, prog_bar=True, sync_dist=True, batch_size=self.config['training']['batch_size'])
         
         return results['total_loss']
 
@@ -157,7 +157,7 @@ class UnifiedTrainer(L.LightningModule):
             'val_total_loss': results['total_loss'],
             'val_dgt_loss': results['dgt_loss'],
             'val_pgt_loss': results['pgt_loss']
-        })
+        }, prog_bar=True, sync_dist=True, batch_size=self.config['training']['batch_size'])
         
         # For evaluation metrics, return scores and labels
         return {

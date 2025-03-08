@@ -13,7 +13,7 @@
         "PGT": {
             "d_model": 64,
             "nhead": 4,
-            "num_layers": 1,
+            "num_layers": 2,
             "current_inclusive": false
         }
     },
