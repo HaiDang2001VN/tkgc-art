@@ -38,13 +38,16 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
                     masked.sum() / adj_matrix.sum())
                 raise ValueError("Division by zero")
         else:
-            layer_loss = -masked.sum() / adj_matrix.sum()
+            # Modified to use log scaling
+            normalized_attn = masked.sum() / adj_matrix.sum()
+            layer_loss = -torch.log(normalized_attn + 1e-10)  # Add epsilon for numerical stability
+            
         total_loss += (weight / total_weight) * layer_loss
         
     return total_loss
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
-    batch_likelihood = 0.0
+    batch_log_likelihood = 0.0  # Changed to track log likelihood
     edge_scores = []
     
     for emb, mask in zip(final_embeddings, central_masks):
@@ -60,28 +63,25 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
             raise ValueError(f"Expected exactly 2 central nodes, got {len(central_indices)}")
         
         i, j = central_indices
-        # print(i, j)
-        # Sum both directions for undirected graph (for loss calculation)
+        
+        # Sum both directions for undirected graph
         edge_likelihood = attn_weights[i, j] + attn_weights[j, i]
-        batch_likelihood += edge_likelihood
         
-        # Calculate quantile-based edge score
-        n = attn_weights.size(0)  # Number of nodes
+        # Apply log transformation to edge likelihood
+        log_edge_likelihood = torch.log(edge_likelihood + 1e-10)
+        batch_log_likelihood += log_edge_likelihood
         
-        # For i->j: quantile of j in i's attention distribution
+        # Calculate quantile-based edge score (unchanged)
+        n = attn_weights.size(0)
         i_to_all = attn_weights[i]
         j_quantile_in_i = torch.sum(i_to_all <= i_to_all[j]).float() / n
-        
-        # For j->i: quantile of i in j's attention distribution
         j_to_all = attn_weights[j]
         i_quantile_in_j = torch.sum(j_to_all <= j_to_all[i]).float() / n
-        
-        # Average the two directional quantile scores
         edge_quantile_score = (j_quantile_in_i + i_quantile_in_j) / 2.0
         edge_scores.append(edge_quantile_score)
     
-    avg_likelihood = batch_likelihood / len(final_embeddings)
-    return -avg_likelihood, edge_scores
+    avg_log_likelihood = batch_log_likelihood / len(final_embeddings)
+    return -avg_log_likelihood, edge_scores
 
 def adaptive_update(old_emb, new_emb, distance):
     weights = distance.unsqueeze(-1)

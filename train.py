@@ -65,7 +65,11 @@ class UnifiedTrainer(L.LightningModule):
         self.config = config
         print("Creating models with config: ", config)
         self.dgt = DGT(config['models']['DGT'])
-        self.pgt = PGT(config['models']['PGT'])
+        self.predictive = config['training']['predictive']
+        if self.predictive:
+            self.pgt = PGT(config['models']['PGT'])
+        else:
+            print("PGT not created.")
         print("Models created.")
         print("Creating embedding manager with num_nodes: ", num_nodes)
         print("node_dim = ", config['models']['DGT']['d_model'])
@@ -118,8 +122,12 @@ class UnifiedTrainer(L.LightningModule):
         # Process DGT embeddings
         dgt_loss = self._dgt_forward(batch['dgt'], emb_manager)
         
-        # Process PGT embeddings
-        pgt_loss, pgt_scores = self._pgt_forward(batch['pgt'], emb_manager)
+        if self.predictive:
+            # Process PGT embeddings
+            pgt_loss, pgt_scores = self._pgt_forward(batch['pgt'], emb_manager)
+        else:
+            pgt_loss = torch.tensor(0.0)
+            pgt_scores = {}
 
         # Handle timestamp transitions
         if batch['meta']['is_group_end']:

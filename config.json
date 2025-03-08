@@ -28,7 +28,8 @@
         "persistent_workers": true,
         "pin_memory": true,
         "strategy": null,
-        "precision": 32
+        "precision": 32,
+        "predictive": false
     },
     "data": {
         "name": "ogbl-collab",
