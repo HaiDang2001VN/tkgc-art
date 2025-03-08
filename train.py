@@ -7,6 +7,9 @@ from models import DGT, PGT, TemporalEmbeddingManager
 from loss import compute_dgt_loss, compute_pgt_loss, adaptive_update
 from ogb.linkproppred import Evaluator
 import numpy as np
+from lightning.pytorch.loggers import CSVLogger  # Import CSVLogger
+import os
+from datetime import datetime
 
 class SyncedGraphDataModule(L.LightningDataModule):
     def __init__(self, config):
@@ -400,6 +403,20 @@ if __name__ == "__main__":
         config = json.load(f)
         
     print("Config: ", config)
+    
+    # Create log directory with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    experiment_name = config.get('experiment_name', 'temporal_graph_learning')
+    log_dir = os.path.join("logs", f"{experiment_name}_{timestamp}")
+    
+    # Create CSV logger
+    logger = CSVLogger(
+        save_dir=log_dir,
+        name="metrics",
+        flush_logs_every_n_steps=config['training']['log_flush']'  # Flush to disk frequently
+    )
+    print(f"Logging metrics to: {logger.log_dir}")
+    
     print("Creating datamodule...")
     datamodule = SyncedGraphDataModule(config)
     print("Preparing data...")
@@ -411,7 +428,20 @@ if __name__ == "__main__":
         max_epochs=config['training']['num_epochs'],
         accelerator=config['training']['accelerator'],
         devices=config['training']['devices'],
-        log_every_n_steps=5
+        log_every_n_steps=config['training']["log_freq"],
+        logger=logger,  # Add CSV logger
+        enable_checkpointing=True,
+        default_root_dir=log_dir  # Store checkpoints in the same directory
     )
     print("Fitting model...")
     trainer.fit(model, datamodule=datamodule)
+    
+    # Save final model
+    final_model_path = os.path.join(log_dir, "final_model.pt")
+    torch.save(model.state_dict(), final_model_path)
+    print(f"Model saved to {final_model_path}")
+    
+    # Optionally save configuration with the results
+    config_path = os.path.join(log_dir, "config.json")
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)

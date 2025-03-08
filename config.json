@@ -29,7 +29,9 @@
         "pin_memory": true,
         "strategy": null,
         "precision": 32,
-        "predictive": false
+        "predictive": false,
+        "log_freq": 5,
+        "log_flush": 50
     },
     "data": {
         "name": "ogbl-collab",
