@@ -413,7 +413,7 @@ if __name__ == "__main__":
     logger = CSVLogger(
         save_dir=log_dir,
         name="metrics",
-        flush_logs_every_n_steps=config['training']['log_flush']'  # Flush to disk frequently
+        flush_logs_every_n_steps=config['training']['log_flush']  # Flush to disk frequently
     )
     print(f"Logging metrics to: {logger.log_dir}")
     
