@@ -261,6 +261,12 @@ class UnifiedTrainer(L.LightningModule):
 
     def on_validation_epoch_end(self):
         """Calculate and log link prediction metrics using OGB evaluator"""
+        # Skip evaluation if not in predictive mode
+        if not self.predictive:
+            self.log('val_status', 0.0, prog_bar=True)  # Indicator that evaluation was skipped
+            print("Skipping validation metrics: predictive mode is disabled")
+            return
+            
         # Collect all outputs from validation steps
         outputs = self.validation_step_outputs
         
@@ -269,8 +275,11 @@ class UnifiedTrainer(L.LightningModule):
         all_labels = []
         
         for output in outputs:
-            scores_dict = output['pgt_scores']
-            if 'labels' in scores_dict and scores_dict['labels'] is not None:
+            scores_dict = output.get('pgt_scores', {})
+            # Check if scores_dict has both required keys
+            if (scores_dict and 'scores' in scores_dict and 'labels' in scores_dict and 
+                scores_dict['labels'] is not None and scores_dict['scores'] is not None):
+                
                 scores = scores_dict['scores']
                 labels = scores_dict['labels']
                 
@@ -278,6 +287,12 @@ class UnifiedTrainer(L.LightningModule):
                 all_scores.extend([score.item() for score in scores])
                 all_labels.extend([label.item() for label in labels])
         
+        # Check if we have enough data to calculate metrics
+        if len(all_scores) == 0 or len(all_labels) == 0:
+            print("WARNING: No validation data available for metrics calculation")
+            self.log('val_no_data', -1.0, prog_bar=True)
+            return
+            
         # Convert to numpy arrays
         scores_np = np.array(all_scores)
         labels_np = np.array(all_labels)
@@ -288,6 +303,12 @@ class UnifiedTrainer(L.LightningModule):
         
         pos_edge_scores = scores_np[pos_indices]
         neg_edge_scores = scores_np[neg_indices]
+        
+        # Check if we have both positive and negative examples
+        if len(pos_edge_scores) == 0 or len(neg_edge_scores) == 0:
+            print(f"WARNING: Missing examples for evaluation. Positive: {len(pos_edge_scores)}, Negative: {len(neg_edge_scores)}")
+            self.log('val_imbalanced_data', -1.0, prog_bar=True)
+            return
         
         # For OGB evaluator
         y_pred_pos = torch.tensor(pos_edge_scores)
@@ -308,23 +329,25 @@ class UnifiedTrainer(L.LightningModule):
             
             # Log results
             for metric_name, value in result_dict.items():
-                self.log(f'val_{metric_name}', value)
+                self.log(f'val_{metric_name}', value, prog_bar=True)
                 
             # Also calculate AUC as a common metric
             from sklearn.metrics import roc_auc_score
             y_true = np.concatenate([np.ones_like(pos_edge_scores), np.zeros_like(neg_edge_scores)])
             y_pred = np.concatenate([pos_edge_scores, neg_edge_scores])
-            try:
-                auc_score = roc_auc_score(y_true, y_pred)
-                self.log('val_auc', auc_score)
-            except ValueError as e:
-                self.log('val_auc_error', -1.0)
-                print(f"Error calculating AUC: {e}")
-                
+            
+            auc_score = roc_auc_score(y_true, y_pred)
+            self.log('val_auc', auc_score, prog_bar=True)
+            
+            # Log data statistics for debugging
+            self.log('val_pos_samples', len(pos_edge_scores))
+            self.log('val_neg_samples', len(neg_edge_scores))
+            
         except Exception as e:
-            print(f"Error in evaluator: {e}")
-            # Log dummy metric to avoid failure
-            self.log('val_metric_error', -1.0)
+            print(f"Error in evaluation: {e}")
+            import traceback
+            traceback.print_exc()
+            self.log('val_error', -1.0, prog_bar=True)
 
     def on_validation_epoch_start(self):
         """Initialize collection for validation outputs"""
@@ -348,7 +371,8 @@ class UnifiedTrainer(L.LightningModule):
         # Log device information for debugging
         print(f"Components running on device: {self.device}")
         print(f"DGT is on device: {next(self.dgt.parameters()).device}")
-        print(f"PGT is on device: {next(self.pgt.parameters()).device}")
+        if self.pgt is not None:
+            print(f"PGT is on device: {next(self.pgt.parameters()).device}")
         print(f"Embedding manager moved to device: {self.device}")
 
     def on_train_start(self):
