@@ -83,7 +83,7 @@ class TemporalDataset(IterableDataset):
         while queue:
             current_node, current_dist = queue.popleft()
             
-            if current_dist >= k_hops:
+            if current_dist > k_hops:
                 continue
                 
             # Process edges in time-sorted order with early termination
