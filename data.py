@@ -4,6 +4,7 @@ import torch
 from torch_geometric.utils import to_dense_adj
 from torch.utils.data import IterableDataset
 from ogb.linkproppred import PygLinkPropPredDataset
+import bisect
 
 
 class TemporalDataset(IterableDataset):
@@ -32,34 +33,89 @@ class TemporalDataset(IterableDataset):
     
     def _build_temporal_adjacency(self):
         """
-        Build time-sorted adjacency lists for efficient traversal
-        
-        Note: This structure is shared between workers and should not be modified
-        after initialization.
+        Build time-sorted adjacency lists with deduplication and degree-based secondary sorting.
+        Uses a single pass through time-ordered edges for efficiency.
         """
         positive_edges = self.graph["edges"]["positive"]
         edge_index = positive_edges['edge_index']
         edge_time = positive_edges['edge_time']
         
+        # Get directionality setting
+        is_bidirectional = self.config['data'].get('directionality', 'bi') == 'bi'
+        degree_sort_order = self.config['training'].get('degree_sort', 'decreasing')
+        
         # Create adjacency list for each node
         self.adj_list = [[] for _ in range(self.num_nodes)]
         
-        # Process all edges
-        for i in range(edge_index.size(1)):
-            src, dst = edge_index[0, i].item(), edge_index[1, i].item()
-            t = edge_time[i].item()
-            
-            # Store (neighbor, time, edge_idx) tuples
-            self.adj_list[src].append((dst, t, i))
-            self.adj_list[dst].append((src, t, i))  # For undirected graphs
+        # Sort edges by timestamp
+        sorted_indices = torch.argsort(edge_time)
         
-        # Sort each list by timestamp for early termination
+        # Group edges by timestamp for efficient processing
+        edges_by_time = defaultdict(list)
+        for idx in sorted_indices:
+            t = edge_time[idx].item()
+            edges_by_time[t].append(idx.item())
+        
+        # Track cumulative degrees for each node (running counter)
+        node_degrees = defaultdict(int)
+        
+        # Process edges in time order
+        for timestamp in sorted(edges_by_time.keys()):
+            # Track unique edges at this timestamp to deduplicate
+            seen_at_timestamp = set()
+            # Track degree increases to apply at the end of this timestamp
+            degree_updates = defaultdict(int)
+            
+            for edge_idx in edges_by_time[timestamp]:
+                src, dst = edge_index[0, edge_idx].item(), edge_index[1, edge_idx].item()
+                
+                # Deduplicate edges
+                edge_key = (src, dst)
+                if edge_key in seen_at_timestamp:
+                    continue
+                    
+                # Mark this edge as seen
+                seen_at_timestamp.add(edge_key)
+                if is_bidirectional:
+                    seen_at_timestamp.add((dst, src))
+                    
+                # Store edge with current cumulative degrees
+                self.adj_list[src].append((dst, timestamp, edge_idx, node_degrees[dst]))
+                
+                # For undirected/bidirectional graphs
+                if is_bidirectional:
+                    self.adj_list[dst].append((src, timestamp, edge_idx, node_degrees[src]))
+                
+                # Track degree increases for this timestamp
+                degree_updates[src] += 1
+                if is_bidirectional:
+                    degree_updates[dst] += 1
+            
+            # Update node degrees after processing all edges at this timestamp
+            for node, degree_increase in degree_updates.items():
+                node_degrees[node] += degree_increase
+        
+        # Sort adjacency lists by timestamp (primary) and degree (secondary)
         for i in range(self.num_nodes):
-            self.adj_list[i].sort(key=lambda x: x[1])  # Sort by timestamp
-    
+            if degree_sort_order == 'decreasing':
+                # Sort by time ascending, then by degree descending
+                self.adj_list[i].sort(key=lambda x: (x[1], -x[3]))
+            else:
+                # Sort by time ascending, then by degree ascending
+                self.adj_list[i].sort(key=lambda x: (x[1], x[3]))
+        
+        # Create parallel arrays of just timestamps for bisect operations
+        self.adj_timestamps = [[] for _ in range(self.num_nodes)]
+        for i in range(self.num_nodes):
+            self.adj_timestamps[i] = [entry[1] for entry in self.adj_list[i]]
+
     def temporal_bfs(self, central_edge, max_t, k_hops, current_inclusive):
-        """Optimized BFS with early termination on time constraint"""
+        """Optimized BFS with fan-out control and optimized temporal cutoff"""
         source, dest = central_edge[0].item(), central_edge[1].item()
+        
+        # Get fan_out parameter and directionality from config
+        fan_out = self.config['training'].get('fan_out', float('inf'))
+        is_bidirectional = self.config['data'].get('directionality', 'bi') == 'bi'
         
         # Add validation for source and dest nodes
         if source >= self.num_nodes or dest >= self.num_nodes:
@@ -70,9 +126,6 @@ class TemporalDataset(IterableDataset):
             distances = torch.tensor([0, 0], dtype=torch.long)
             central_mask = torch.tensor([True, True])
             return nodes, edges, distances, central_mask
-        
-        # Define time comparison operator
-        time_op = (lambda x: x <= max_t) if current_inclusive else (lambda x: x < max_t)
         
         # Use efficient data structures for BFS
         visited_nodes = set([source, dest])
@@ -85,37 +138,68 @@ class TemporalDataset(IterableDataset):
             
             if current_dist > k_hops:
                 continue
+            
+            # Get node's adjacency list
+            adj_nodes = self.adj_list[current_node]
+            
+            # Skip if no neighbors
+            if not adj_nodes:
+                continue
+            
+            # Use pre-computed timestamp list with bisect
+            timestamps = self.adj_timestamps[current_node]
+            
+            # Get cutoff index using one bisect operation
+            if current_inclusive:
+                cutoff_idx = bisect.bisect_right(timestamps, max_t)
+            else:
+                cutoff_idx = bisect.bisect_left(timestamps, max_t)
+            
+            # Count neighbors added for fan-out constraint
+            neighbors_added = 0
+            
+            # Process edges in reverse order (most recent first, up to cutoff)
+            for i in range(cutoff_idx - 1, -1, -1):
+                neighbor, _, edge_idx, _ = adj_nodes[i]  # Unpack with 4-tuple format
                 
-            # Process edges in time-sorted order with early termination
-            for neighbor, t, edge_idx in self.adj_list[current_node]:
-                # Early termination: break as soon as we exceed the max timestamp
-                if not time_op(t):
-                    break  # Since edges are sorted by time, all remaining edges will also fail
-                
+                # Skip if edge already visited
                 if edge_idx in visited_edges:
                     continue
                     
                 visited_edges.add(edge_idx)
                 
+                # For bidirectional graphs, treat the edge as visited in both directions
+                # This prevents the same edge from being traversed twice in different directions
+                if is_bidirectional:
+                    # We don't have direct access to the reverse edge's ID, but we can mark
+                    # the physical edge as visited which is sufficient for deduplication
+                    visited_edges.add(edge_idx)
+                
+                # Add neighbor to queue if not visited before
                 if neighbor not in visited_nodes:
                     visited_nodes.add(neighbor)
                     node_distances[neighbor] = current_dist + 1
                     queue.append((neighbor, current_dist + 1))
+                    
+                    # Increment counter and check fan-out limit
+                    neighbors_added += 1
+                    if neighbors_added >= fan_out:
+                        break
         
         # More efficient tensor creation with pre-allocated lists
         nodes_list = list(visited_nodes)
         edges_list = list(visited_edges)
         
-        # Convert to tensors efficiently
+        # Convert to tensors efficiently - using torch's built-in operations
         nodes = torch.tensor(nodes_list, dtype=torch.long)
         edges = torch.tensor(edges_list, dtype=torch.long)
         
-        # More efficient distance calculation
-        distances = torch.zeros(len(nodes), dtype=torch.long)
-        for i, n in enumerate(nodes):
-            distances[i] = node_distances[n.item()]
+        # Vectorized distance calculation
+        distances = torch.tensor([node_distances[n] for n in nodes_list], dtype=torch.long)
         
-        central_mask = (nodes == source) | (nodes == dest)
+        # Use vectorized operations for central mask
+        central_mask = torch.zeros(len(nodes), dtype=torch.bool)
+        central_mask[(nodes == source) | (nodes == dest)] = True
         
         return nodes, edges, distances, central_mask
 

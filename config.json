@@ -31,12 +31,16 @@
         "precision": 32,
         "predictive": false,
         "log_freq": 5,
-        "log_flush": 50
+        "log_flush": 50,
+        "fan_out": 10,
+        "degree_sort": "decreasing"
     },
     "data": {
         "name": "ogbl-collab",
         "path": "../data",
         "random_seed": 42,
-        "edge_time": "year"
+        "edge_time": "year",
+        "directionality": "bi",
+        "neg_ratio": 1
     }
 }

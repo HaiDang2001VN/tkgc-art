@@ -20,7 +20,7 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
         
         # Handle division by zero (no edges)
         if adj_matrix.sum() == 0:
-            layer_loss = torch.tensor(0.0)
+            layer_loss = torch.tensor(0.0, device=embeddings.device)
             # Error when more than 2 nodes
             if adj_matrix.size(0) > 2:
                 print("embeddings", embeddings.shape)
@@ -34,13 +34,16 @@ def compute_dgt_loss(intermediate_outputs, adj_matrix, layer_weights):
                 print("weight", weight)
                 print("masked.sum()", masked.sum())
                 print("adj_matrix.sum()", adj_matrix.sum())
-                print("masked.sum() / adj_matrix.sum()",
-                    masked.sum() / adj_matrix.sum())
                 raise ValueError("Division by zero")
         else:
-            # Modified to use log scaling
-            normalized_attn = masked.sum() / adj_matrix.sum()
-            layer_loss = -torch.log(normalized_attn + 1e-10)  # Add epsilon for numerical stability
+            # Sum masked attention scores along softmax dimension (per source node)
+            masked_sums = masked.sum(dim=-1)  # [num_nodes]
+            
+            # Add epsilon for numerical stability before taking log
+            log_sums = torch.log(masked_sums + 1e-10)
+            
+            # Calculate mean over all source nodes
+            layer_loss = -log_sums.mean()
             
         total_loss += (weight / total_weight) * layer_loss
         
