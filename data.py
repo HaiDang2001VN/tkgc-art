@@ -110,7 +110,18 @@ class TemporalDataset(IterableDataset):
             self.adj_timestamps[i] = [entry[1] for entry in self.adj_list[i]]
 
     def temporal_bfs(self, central_edge, max_t, k_hops, current_inclusive):
-        """Optimized BFS with fan-out control and optimized temporal cutoff"""
+        """
+        Two-phase BFS with fan-out control and local indexing:
+        1. First collect all nodes (respecting fan-out)
+        2. Build mapping from global to local indices based on sorted ordering
+        3. Then collect all edges between these nodes with local indices (ignoring fan-out)
+        
+        Returns:
+            nodes: Tensor of global node IDs (sorted)
+            edge_list: Tensor of [src, dst] pairs using local indices
+            distances: Distances from source/dest for each node
+            central_mask: Boolean mask indicating central nodes
+        """
         source, dest = central_edge[0].item(), central_edge[1].item()
         
         # Get fan_out parameter and directionality from config
@@ -122,14 +133,13 @@ class TemporalDataset(IterableDataset):
             print(f"WARNING: Edge {source}->{dest} contains node outside graph range (0-{self.num_nodes-1})")
             # Return minimal valid result
             nodes = torch.tensor([source, dest], dtype=torch.long)
-            edges = torch.tensor([], dtype=torch.long)
+            edges = torch.tensor([], dtype=torch.long).reshape(0, 2)  # Empty edge list as [0, 2] tensor
             distances = torch.tensor([0, 0], dtype=torch.long)
             central_mask = torch.tensor([True, True])
             return nodes, edges, distances, central_mask
         
-        # Use efficient data structures for BFS
+        # PHASE 1: Collect all relevant nodes with BFS (respecting fan-out)
         visited_nodes = set([source, dest])
-        visited_edges = set()
         node_distances = {source: 0, dest: 0}
         queue = deque([(source, 0), (dest, 0)])
         
@@ -160,20 +170,7 @@ class TemporalDataset(IterableDataset):
             
             # Process edges in reverse order (most recent first, up to cutoff)
             for i in range(cutoff_idx - 1, -1, -1):
-                neighbor, _, edge_idx, _ = adj_nodes[i]  # Unpack with 4-tuple format
-                
-                # Skip if edge already visited
-                if edge_idx in visited_edges:
-                    continue
-                    
-                visited_edges.add(edge_idx)
-                
-                # For bidirectional graphs, treat the edge as visited in both directions
-                # This prevents the same edge from being traversed twice in different directions
-                if is_bidirectional:
-                    # We don't have direct access to the reverse edge's ID, but we can mark
-                    # the physical edge as visited which is sufficient for deduplication
-                    visited_edges.add(edge_idx)
+                neighbor, _, _, _ = adj_nodes[i]  # Unpack with 4-tuple format
                 
                 # Add neighbor to queue if not visited before
                 if neighbor not in visited_nodes:
@@ -186,13 +183,61 @@ class TemporalDataset(IterableDataset):
                     if neighbors_added >= fan_out:
                         break
         
-        # More efficient tensor creation with pre-allocated lists
-        nodes_list = list(visited_nodes)
-        edges_list = list(visited_edges)
+        # Create sorted node list and global-to-local mapping
+        nodes_list = sorted(list(visited_nodes))
+        global_to_local = {global_id: local_idx for local_idx, global_id in enumerate(nodes_list)}
         
-        # Convert to tensors efficiently - using torch's built-in operations
+        # PHASE 2: Collect all edges between the visited nodes using local indices
+        visited_edges = set()
+        edge_list = []  # Will store [src_local, dst_local] pairs
+        
+        for current_node in visited_nodes:
+            # Get node's adjacency list
+            adj_nodes = self.adj_list[current_node]
+            
+            # Skip if no neighbors
+            if not adj_nodes:
+                continue
+            
+            # Get current node's local index
+            current_local = global_to_local[current_node]
+            
+            # Use pre-computed timestamp list with bisect
+            timestamps = self.adj_timestamps[current_node]
+            
+            # Get cutoff index using one bisect operation
+            if current_inclusive:
+                cutoff_idx = bisect.bisect_right(timestamps, max_t)
+            else:
+                cutoff_idx = bisect.bisect_left(timestamps, max_t)
+            
+            # Process all edges up to cutoff that connect to visited nodes
+            for i in range(cutoff_idx - 1, -1, -1):
+                neighbor, _, edge_idx, _ = adj_nodes[i]  # Unpack with 4-tuple format
+                
+                # Only consider edges where both nodes are in our visited set
+                if neighbor in visited_nodes:
+                    # Skip if edge already visited
+                    if edge_idx in visited_edges:
+                        continue
+                    
+                    # Add the edge ID to visited set for deduplication
+                    visited_edges.add(edge_idx)
+                    
+                    # Get neighbor's local index
+                    neighbor_local = global_to_local[neighbor]
+                    
+                    # Add edge with local indices to edge list
+                    edge_list.append([current_local, neighbor_local])
+        
+        # Convert to tensors efficiently
         nodes = torch.tensor(nodes_list, dtype=torch.long)
-        edges = torch.tensor(edges_list, dtype=torch.long)
+        
+        # Convert edge list to tensor, or create empty tensor with correct shape
+        if edge_list:
+            edges = torch.tensor(edge_list, dtype=torch.long)
+        else:
+            edges = torch.zeros((0, 2), dtype=torch.long)
         
         # Vectorized distance calculation
         distances = torch.tensor([node_distances[n] for n in nodes_list], dtype=torch.long)
@@ -477,42 +522,27 @@ class TemporalDataset(IterableDataset):
             k_hops=k_hops,
             current_inclusive=current_inclusive
         )
-
-        # Sort nodes for searchsorted operations
-        sort_indices = torch.argsort(nodes)
-        nodes = nodes[sort_indices]
-        distances = distances[sort_indices]
-        central_mask = central_mask[sort_indices]
-
-        # Get original edge pairs
-        positive_edges = self.graph["edges"]["positive"]
-        edge_pairs = positive_edges['edge_index'][:, edges]
         
-        # Map to local indices
-        source_idx = torch.searchsorted(nodes, edge_pairs[0])
-        dest_idx = torch.searchsorted(nodes, edge_pairs[1])
-        local_edges = torch.stack([source_idx, dest_idx])
-
-        # Create adjacency matrix
+        # No need to sort nodes - they're already sorted in temporal_bfs
+        # No need for edge lookups - edges already have local indices
+        
+        # Just transpose to get shape [2, num_edges] as expected by to_dense_adj
+        local_edges = edges.t()
+        
+        # Create adjacency matrix directly from local indices
         adj = to_dense_adj(local_edges, max_num_nodes=len(nodes))[0]
-
-        # Debug for empty adjacency matrices (keeping your original debugging logic)
+        
+        # Debug for empty adjacency matrices (updated debugging logic)
         if adj.sum() == 0 and len(nodes) > 2:
             print("=" * 50)
             print("WARNING: Empty adjacency matrix detected")
             print(f"Max timestamp: {max_t}")
             print(f"Number of nodes: {len(nodes)}")
-            print(f"Number of edges before conversion: {len(edges)}")
-            print(f"Edge pairs shape: {edge_pairs.shape}")
+            print(f"Number of edges: {edges.shape[0]}")
             print(f"Local edges shape: {local_edges.shape}")
             if local_edges.numel() > 0:
-                print(f"Original edge pairs: {edge_pairs[:, :min(5, edge_pairs.shape[1])].tolist()}")
                 print(f"First 5 local edges: {local_edges[:, :min(5, local_edges.shape[1])].tolist()}")
             print(f"Original central edge: {central_edge.tolist()}")
-            print(f"Source idx: {source_idx.shape}, Dest idx: {dest_idx.shape}")
-            if source_idx.numel() > 0:
-                matching_indices = (source_idx < len(nodes)) & (dest_idx < len(nodes))
-                print(f"Valid indices: {matching_indices.sum()}/{len(matching_indices)}")
             print("=" * 50)
 
         return {
