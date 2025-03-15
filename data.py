@@ -424,7 +424,7 @@ class TemporalDataset(IterableDataset):
                 'data': self.data,
                 'graph': self.graph,
                 'split_groups': self.split_groups,
-                'adj_list': self.adj_list  # Now safely shared,
+                'adj_list': self.adj_list,  # Now safely shared
                 'adj_timestamps': self.adj_timestamps
             }
         )
