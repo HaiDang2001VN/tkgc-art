@@ -30,6 +30,7 @@ class TemporalDataset(IterableDataset):
             self.num_nodes = self.graph['num_nodes']
             self.split_groups = parent_groups['split_groups']
             self.adj_list = parent_groups.get('adj_list')  # Share precomputed adjacency lists
+            self.adj_timestamps = parent_groups.get('adj_timestamps')  # Share precomputed timestamps
     
     def _build_temporal_adjacency(self):
         """
@@ -423,7 +424,8 @@ class TemporalDataset(IterableDataset):
                 'data': self.data,
                 'graph': self.graph,
                 'split_groups': self.split_groups,
-                'adj_list': self.adj_list  # Now safely shared
+                'adj_list': self.adj_list  # Now safely shared,
+                'adj_timestamps': self.adj_timestamps
             }
         )
 
