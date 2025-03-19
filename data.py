@@ -143,11 +143,11 @@ class TemporalDataset(IterableDataset):
         visited_nodes = set([source, dest])
         node_distances = {source: 0, dest: 0}
         queue = deque([(source, 0), (dest, 0)])
-        hop_cnt = defaultdict(int)
+        # hop_cnt = defaultdict(int)
         
         while queue:
             current_node, current_dist = queue.popleft()
-            hop_cnt[current_dist] += 1
+            # hop_cnt[current_dist] += 1
             
             if current_dist == k_hops:
                 break
@@ -189,7 +189,7 @@ class TemporalDataset(IterableDataset):
                     
             # print("Visited nodes: ", len(visited_nodes), " - Queue size: ", len(queue))
         
-        print("Hop count: ", dict(hop_cnt))
+        # print("Hop count: ", dict(hop_cnt))
         # Create sorted node list and global-to-local mapping
         nodes_list = sorted(list(visited_nodes))
         global_to_local = {global_id: local_idx for local_idx, global_id in enumerate(nodes_list)}
@@ -254,7 +254,7 @@ class TemporalDataset(IterableDataset):
         central_mask[(nodes == source) | (nodes == dest)] = True
         
         # Print nodes edges information
-        print("Num nodes: ", len(nodes), " - Num edges: ", edges.size(0))
+        # print("Num nodes: ", len(nodes), " - Num edges: ", edges.size(0))
         
         return nodes, edges, distances, central_mask
 
