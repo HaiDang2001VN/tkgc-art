@@ -184,6 +184,8 @@ class TemporalDataset(IterableDataset):
                     neighbors_added += 1
                     if neighbors_added >= fan_out:
                         break
+                    
+            print("Visited nodes: ", len(visited_nodes), " - Queue size: ", len(queue))
         
         # Create sorted node list and global-to-local mapping
         nodes_list = sorted(list(visited_nodes))
