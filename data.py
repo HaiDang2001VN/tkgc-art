@@ -143,9 +143,11 @@ class TemporalDataset(IterableDataset):
         visited_nodes = set([source, dest])
         node_distances = {source: 0, dest: 0}
         queue = deque([(source, 0), (dest, 0)])
+        hop_cnt = defaultdict(int)
         
         while queue:
             current_node, current_dist = queue.popleft()
+            hop_cnt[current_dist] += 1
             
             if current_dist > k_hops:
                 continue
@@ -185,8 +187,9 @@ class TemporalDataset(IterableDataset):
                     if neighbors_added >= fan_out:
                         break
                     
-            print("Visited nodes: ", len(visited_nodes), " - Queue size: ", len(queue))
+            # print("Visited nodes: ", len(visited_nodes), " - Queue size: ", len(queue))
         
+        print("Hop count: ", dict(hop_cnt))
         # Create sorted node list and global-to-local mapping
         nodes_list = sorted(list(visited_nodes))
         global_to_local = {global_id: local_idx for local_idx, global_id in enumerate(nodes_list)}
