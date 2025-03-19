@@ -166,6 +166,7 @@ class TemporalDataset(IterableDataset):
             else:
                 cutoff_idx = bisect.bisect_left(timestamps, max_t)
             
+            print("Node: ", current_node, " - Cutoff index: ", cutoff_idx)
             # Count neighbors added for fan-out constraint
             neighbors_added = 0
             
@@ -246,6 +247,9 @@ class TemporalDataset(IterableDataset):
         # Use vectorized operations for central mask
         central_mask = torch.zeros(len(nodes), dtype=torch.bool)
         central_mask[(nodes == source) | (nodes == dest)] = True
+        
+        # Print nodes edges information
+        print("Num nodes: ", len(nodes), " - Num edges: ", edges.size(0))
         
         return nodes, edges, distances, central_mask
 
