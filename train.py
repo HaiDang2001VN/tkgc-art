@@ -167,6 +167,63 @@ class UnifiedTrainer(L.LightningModule):
         }, prog_bar=True, sync_dist=True, batch_size=self.config['training']['batch_size'])
         
         return results['total_loss']
+    
+    def on_train_epoch_end(self):
+        """Save checkpoints for models and embedding manager at the end of each training epoch"""
+        epoch = self.current_epoch
+        
+        # Check if we should save a checkpoint this epoch
+        ckpt_freq = self.config['training'].get('ckpt_freq', 1)
+        if epoch % ckpt_freq != 0:
+            return
+        
+        # Get checkpoint parameters from config
+        ckpt_dir = self.config['training'].get('ckpt_dir', '../checkpoints')
+        ckpt_name = self.config['training'].get('ckpt_name', 'model')
+        ckpt_keep = self.config['training'].get('ckpt_keep', 1)
+        
+        # Create epoch-specific checkpoint directory
+        checkpoint_dir = os.path.join(ckpt_dir, f"epoch_{epoch}")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        
+        # Save DGT model
+        dgt_path = os.path.join(checkpoint_dir, f"{ckpt_name}_dgt.pt")
+        torch.save(self.dgt.state_dict(), dgt_path)
+        
+        # Save PGT model if in predictive mode
+        if self.predictive:
+            pgt_path = os.path.join(checkpoint_dir, f"{ckpt_name}_pgt.pt")
+            torch.save(self.pgt.state_dict(), pgt_path)
+        
+        # Save embedding manager
+        emb_path = os.path.join(checkpoint_dir, f"{ckpt_name}_embedding_manager.pt")
+        torch.save(self.emb_manager.state_dict(), emb_path)
+        
+        print(f"Saved model and embedding manager checkpoints for epoch {epoch} to {checkpoint_dir}")
+        
+        # Implement checkpoint retention logic (keep only the most recent ckpt_keep checkpoints)
+        if ckpt_keep > 0:
+            # List all epoch checkpoint directories
+            all_ckpts = []
+            for dirname in os.listdir(ckpt_dir):
+                if dirname.startswith('epoch_') and os.path.isdir(os.path.join(ckpt_dir, dirname)):
+                    try:
+                        epoch_num = int(dirname.split('_')[1])
+                        all_ckpts.append((epoch_num, dirname))
+                    except (IndexError, ValueError):
+                        pass
+            
+            # Sort by epoch number (descending)
+            all_ckpts.sort(reverse=True)
+            
+            # Remove older checkpoints beyond the keep limit
+            for epoch_num, dirname in all_ckpts[ckpt_keep:]:
+                try:
+                    import shutil
+                    shutil.rmtree(os.path.join(ckpt_dir, dirname))
+                    print(f"Removed old checkpoint: {dirname}")
+                except Exception as e:
+                    print(f"Error removing old checkpoint {dirname}: {e}")
 
     def validation_step(self, batch, batch_idx):
         # Use the step function with validation embedding manager
