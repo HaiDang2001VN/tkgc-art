@@ -295,7 +295,7 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
         # Calculate statistics excluding the central edge
         i_sims_no_central = i_sims[i_mask]  # [num_nodes-1]
         i_mean = i_sims_no_central.mean()  # scalar
-        i_std = i_sims_no_central.std(unbiased=True)  # scalar
+        i_std = i_sims_no_central.std(correction=0)  # scalar
         i_std = torch.clamp(i_std, min=1e-10)  # Prevent division by zero
         i_z_score = (central_edge_sim - i_mean) / i_std  # scalar
         
@@ -309,7 +309,7 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
         # Calculate statistics excluding the central edge
         j_sims_no_central = j_sims[j_mask]  # [num_nodes-1]
         j_mean = j_sims_no_central.mean()  # scalar
-        j_std = j_sims_no_central.std(unbiased=True)  # scalar
+        j_std = j_sims_no_central.std(correction=0)  # scalar
         j_std = torch.clamp(j_std, min=1e-10)  # Prevent division by zero
         j_z_score = (central_edge_sim - j_mean) / j_std  # scalar
         
