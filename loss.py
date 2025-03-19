@@ -225,14 +225,13 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     
     # Calculate true standard deviation (without +1 stability term)
     true_std_sq = conn_var + non_conn_var  # [num_layers, num_nodes]
-    eps = 1e-10
-    true_std = torch.sqrt(torch.clamp(true_std_sq, min=eps))  # [num_layers, num_nodes]
+    true_std = torch.sqrt(torch.clamp(true_std_sq, min=1e-10))  # [num_layers, num_nodes]
     
     # Calculate Welch test statistics
     welch_stats = mean_diff / true_std  # [num_layers, num_nodes]
     
     # Create mask for valid entries (true_std > 0 and valid nodes)
-    valid_welch_mask = (true_std_sq > 1e2 * eps) & valid_nodes_expanded  # [num_layers, num_nodes]
+    valid_welch_mask = (true_std_sq > 1e-3) & valid_nodes_expanded  # [num_layers, num_nodes]
     
     # Get the last layer's statistics
     last_layer_welch = welch_stats[-1]  # [num_nodes]
