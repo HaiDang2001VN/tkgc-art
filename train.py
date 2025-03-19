@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 from data import TemporalDataset
 from models import DGT, PGT, TemporalEmbeddingManager
-from loss import compute_dgt_loss, compute_pgt_loss, adaptive_update
+from loss import compute_dgt_loss, compute_pgt_loss, adaptive_update_multi_layer
 from ogb.linkproppred import Evaluator
 import numpy as np
 from lightning.pytorch.loggers import CSVLogger  # Import CSVLogger
@@ -123,14 +123,15 @@ class UnifiedTrainer(L.LightningModule):
             emb_manager = self.emb_manager
         
         # Process DGT embeddings
-        dgt_loss = self._dgt_forward(batch['dgt'], emb_manager)
+        dgt_loss, mean_diff = self._dgt_forward(batch['dgt'], emb_manager)
         
         if self.predictive:
             # Process PGT embeddings
-            pgt_loss, pgt_scores = self._pgt_forward(batch['pgt'], emb_manager)
+            pgt_loss, pgt_scores, raw_z_score = self._pgt_forward(batch['pgt'], emb_manager)
         else:
             pgt_loss = torch.tensor(0.0)
             pgt_scores = {}
+            raw_z_score = torch.tensor(0.0)
 
         # Handle timestamp transitions
         if batch['meta']['is_group_end']:
@@ -143,7 +144,9 @@ class UnifiedTrainer(L.LightningModule):
             'dgt_loss': dgt_loss,
             'pgt_loss': pgt_loss,
             'total_loss': total_loss,
-            'pgt_scores': pgt_scores
+            'pgt_scores': pgt_scores,
+            'mean_diff': mean_diff,
+            'raw_z_score': raw_z_score
         }
 
     def training_step(self, batch, batch_idx):
@@ -153,12 +156,14 @@ class UnifiedTrainer(L.LightningModule):
         # Extract timestamp from batch (mean of all edge timestamps in batch)
         batch_timestamp = batch['edge_time'].float().mean().item()
         
-        # Log with train prefix
+        # Log with train prefix including new metrics
         self.log_dict({
             'train_total_loss': results['total_loss'],
             'train_dgt_loss': results['dgt_loss'],
             'train_pgt_loss': results['pgt_loss'],
-            'train_timestamp': batch_timestamp  # Add timestamp logging
+            'train_dgt_mean_diff': results['mean_diff'],
+            'train_pgt_z_score': results['raw_z_score'],
+            'train_timestamp': batch_timestamp
         }, prog_bar=True, sync_dist=True, batch_size=self.config['training']['batch_size'])
         
         return results['total_loss']
@@ -170,12 +175,14 @@ class UnifiedTrainer(L.LightningModule):
         # Extract timestamp from batch (mean of all edge timestamps in batch)
         batch_timestamp = batch['edge_time'].float().mean().item()
         
-        # Log with validation prefix
+        # Log with validation prefix including new metrics
         self.log_dict({
             'val_total_loss': results['total_loss'],
             'val_dgt_loss': results['dgt_loss'],
             'val_pgt_loss': results['pgt_loss'],
-            'val_timestamp': batch_timestamp  # Add timestamp logging
+            'val_dgt_mean_diff': results['mean_diff'],
+            'val_pgt_z_score': results['raw_z_score'],
+            'val_timestamp': batch_timestamp
         }, prog_bar=True, sync_dist=True, batch_size=self.config['training']['batch_size'])
         
         # For evaluation metrics, return scores and labels
@@ -195,11 +202,13 @@ class UnifiedTrainer(L.LightningModule):
             
         Returns:
             Mean loss across batch (scalar)
+            Mean difference metric
         """
         if emb_manager is None:
             emb_manager = self.emb_manager
             
         losses = []
+        mean_diffs = []  # Track mean differences
         for item in batch:
             nodes = item['nodes']  # List of node IDs
             adj = item['adj']  # Adjacency matrix [num_nodes, num_nodes]
@@ -219,9 +228,7 @@ class UnifiedTrainer(L.LightningModule):
             intermediate = self.dgt(old_emb.unsqueeze(0))
             
             # Apply adaptive weighting to all layers and convert to tensor format
-            # weighted_embs: [num_layers, num_nodes, dim]
-            # layer_weight_tensor: [num_layers]
-            weighted_embs, layer_weight_tensor, layer_indices = loss.adaptive_update_multi_layer(
+            weighted_embs, layer_weight_tensor, layer_indices = adaptive_update_multi_layer(
                 old_emb, 
                 intermediate, 
                 dist,
@@ -229,8 +236,8 @@ class UnifiedTrainer(L.LightningModule):
             )
             
             # Compute loss using the adaptively weighted embeddings
-            # Returns scalar loss
-            loss_val = loss.compute_dgt_loss(
+            # Returns both loss and mean diff
+            loss_val, mean_diff = compute_dgt_loss(
                 weighted_embs,  # [num_layers, num_nodes, dim]
                 adj,  # [num_nodes, num_nodes]
                 layer_weight_tensor  # [num_layers]
@@ -247,8 +254,9 @@ class UnifiedTrainer(L.LightningModule):
                     emb_manager.update_embeddings(node, last_layer_weighted[i])
             
             losses.append(loss_val)
+            mean_diffs.append(mean_diff)
             
-        return torch.mean(torch.stack(losses))  # scalar
+        return torch.mean(torch.stack(losses)), torch.mean(torch.stack(mean_diffs))
 
     def _pgt_forward(self, batch, emb_manager=None):
         if emb_manager is None:
@@ -262,33 +270,24 @@ class UnifiedTrainer(L.LightningModule):
             nodes = item['nodes']
             mask = item['central_mask']
             
-            # print("Nodes shape: ", nodes.shape)
-            # print("Nodes: ", nodes)
-            # print("Mask shape: ", mask.shape)
-            # print("Mask: ", mask)
-            
             # Store label if available (for validation/test)
             if 'label' in item:
                 labels.append(item['label'])
             
             old_emb = emb_manager.get_embedding(nodes)
-            # print("Old emb shape: ", old_emb.shape)
-            # print("Emb: ", old_emb.unsqueeze(0).shape)
             final_out = self.pgt(old_emb.unsqueeze(0))
-            # print("Final out shape: ", final_out.shape)
             res = final_out.squeeze(0)
-            # print("Final out shape: ", res.shape)
             final_embs.append(res)
             masks.append(mask)
 
-        # Compute PGT loss and get edge scores
-        pgt_loss, edge_scores = compute_pgt_loss(final_embs, masks, self.config['models']['PGT']['d_model'])
+        # Compute PGT loss and get edge scores and raw z-score
+        pgt_loss, edge_scores, raw_z_score = compute_pgt_loss(final_embs, masks, self.config['models']['PGT']['d_model'])
         
         # Return labels along with scores if available
         if labels:
-            return pgt_loss, {'scores': edge_scores, 'labels': labels}
+            return pgt_loss, {'scores': edge_scores, 'labels': labels}, raw_z_score
         else:
-            return pgt_loss, {'scores': edge_scores}
+            return pgt_loss, {'scores': edge_scores}, raw_z_score
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), 

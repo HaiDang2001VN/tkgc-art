@@ -222,7 +222,10 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     else:
         total_loss = torch.mean(layer_losses)  # scalar
     
-    return total_loss
+    # Compute average unnormalized mean difference
+    avg_mean_diff = torch.mean(mean_diff)  # scalar
+    
+    return total_loss, avg_mean_diff
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
     """
@@ -295,4 +298,4 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
     
     avg_z_score = batch_z_score / len(final_embeddings)  # scalar
     # Return negative z-score as loss (to maximize z-score)
-    return -avg_z_score, edge_scores
+    return -avg_z_score, edge_scores, avg_z_score
