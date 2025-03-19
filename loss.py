@@ -15,7 +15,7 @@ def adaptive_update(old_emb, new_emb, distance):
         Updated embeddings [num_nodes, dim]
     """
     weights = distance.unsqueeze(-1)  # [num_nodes, 1]
-    return (1 - weights) * old_emb + weights * new_emb.detach()
+    return (1 - weights) * old_emb + weights * new_emb
 
 def adaptive_update_multi_layer(old_emb, intermediate_outputs, distance, layer_weights):
     """
@@ -193,8 +193,8 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     # We want to maximize the difference between non-connected and connected similarities
     mean_diff = non_connected_means - connected_means  # [num_layers, num_nodes]
     
-    # Weight mean differences by pooled std
-    weighted_diffs = pooled_std * mean_diff  # [num_layers, num_nodes]
+    # Weight mean differences by DETACHED pooled std to prevent gradient flow through std
+    weighted_diffs = pooled_std.detach() * mean_diff  # [num_layers, num_nodes]
     
     # Expand valid nodes mask to all layers
     valid_nodes_expanded = valid_nodes.unsqueeze(0).expand(num_layers, -1)  # [num_layers, num_nodes]
@@ -202,17 +202,18 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     # Calculate weighted loss contributions for each node in each layer
     weighted_node_losses = weighted_diffs * valid_nodes_expanded.float()  # [num_layers, num_nodes]
     
-    # Calculate sum of pooled std across valid nodes for each layer
-    pooled_std_sums = torch.sum(pooled_std * valid_nodes_expanded.float(), dim=1)  # [num_layers]
+    # Calculate sum of pooled std across valid nodes for each layer (using detached pooled_std)
+    pooled_std_sums = torch.sum(pooled_std.detach() * valid_nodes_expanded.float(), dim=1)  # [num_layers]
     
-    # Calculate layer losses with safe division
-    layer_losses = torch.zeros(num_layers, device=device)  # [num_layers]
+    # Calculate layer losses with safe division using torch.where instead of boolean indexing
+    numerators = torch.sum(weighted_node_losses, dim=1)  # [num_layers]
+    denominators = torch.clamp(pooled_std_sums, min=1e-10)  # [num_layers]
     valid_layers = pooled_std_sums > 0  # [num_layers]
-    
-    # Only compute loss for layers with valid nodes
-    layer_losses[valid_layers] = torch.sum(
-        weighted_node_losses[valid_layers], dim=1
-    ) / pooled_std_sums[valid_layers]  # [num_layers]
+    layer_losses = torch.where(
+        valid_layers, 
+        numerators / denominators,
+        torch.zeros_like(numerators)
+    )  # [num_layers]
     
     # Weight layers by importance and sum
     if layer_weight_tensor is not None:
@@ -225,7 +226,8 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     # Compute average unnormalized mean difference
     avg_mean_diff = torch.mean(mean_diff)  # scalar
     
-    return total_loss, avg_mean_diff
+    # return total_loss, avg_mean_diff
+    return avg_mean_diff, total_loss
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
     """
