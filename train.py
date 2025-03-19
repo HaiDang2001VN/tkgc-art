@@ -186,45 +186,69 @@ class UnifiedTrainer(L.LightningModule):
         }
 
     def _dgt_forward(self, batch, emb_manager=None):
+        """
+        Forward pass for DGT model using adaptive weighted embeddings
+        
+        Args:
+            batch: List of dictionaries with graph data
+            emb_manager: Embedding manager for retrieving and updating node embeddings
+            
+        Returns:
+            Mean loss across batch (scalar)
+        """
         if emb_manager is None:
             emb_manager = self.emb_manager
             
         losses = []
         for item in batch:
-            nodes = item['nodes']
-            adj = item['adj']
-            dist = item['dist']
-            mask = item['central_mask']
+            nodes = item['nodes']  # List of node IDs
+            adj = item['adj']  # Adjacency matrix [num_nodes, num_nodes]
+            dist = item['dist']  # Distance weights [num_nodes]
+            mask = item['central_mask']  # Boolean mask for central nodes [num_nodes]
             
             # Only for training or when we know it's a positive edge
-            # During validation/test we check for labels if available
             is_positive = True
             if 'label' in item:
                 is_positive = item['label'] > 0
             
-            # print("Nodes shape: ", nodes.shape)
-            # print("Adj shape: ", adj.shape)
+            # Get old embeddings [num_nodes, dim]
             old_emb = emb_manager.get_embedding(nodes)
-            # print("Old emb shape: ", old_emb.shape)
+            
+            # Get intermediate outputs from transformer
+            # Returns dictionary {layer_idx: tensor of shape [1, num_nodes, dim]}
             intermediate = self.dgt(old_emb.unsqueeze(0))
             
-            # Only update embeddings for positive items
+            # Apply adaptive weighting to all layers and convert to tensor format
+            # weighted_embs: [num_layers, num_nodes, dim]
+            # layer_weight_tensor: [num_layers]
+            weighted_embs, layer_weight_tensor, layer_indices = loss.adaptive_update_multi_layer(
+                old_emb, 
+                intermediate, 
+                dist,
+                self.dgt.intermediate_layers
+            )
+            
+            # Compute loss using the adaptively weighted embeddings
+            # Returns scalar loss
+            loss_val = loss.compute_dgt_loss(
+                weighted_embs,  # [num_layers, num_nodes, dim]
+                adj,  # [num_nodes, num_nodes]
+                layer_weight_tensor  # [num_layers]
+            )
+            
+            # For positive edges, update the embeddings using the last layer
             if is_positive:
-                new_emb = adaptive_update(
-                    old_emb,
-                    intermediate[self.last_layer].squeeze(0),
-                    dist
-                )
+                # Find the index of the last layer in our ordered layers
+                last_layer_idx = layer_indices.index(self.last_layer)
+                # Use the weighted embeddings for the last layer [num_nodes, dim]
+                last_layer_weighted = weighted_embs[last_layer_idx]
                 
                 for i, node in enumerate(nodes):
-                    emb_manager.update_embeddings(node, new_emb[i])
+                    emb_manager.update_embeddings(node, last_layer_weighted[i])
             
-            loss = compute_dgt_loss(intermediate, adj, 
-                                  self.dgt.intermediate_layers)
-            # print("Loss: ", loss.item())
-            losses.append(loss)
+            losses.append(loss_val)
             
-        return torch.mean(torch.stack(losses))
+        return torch.mean(torch.stack(losses))  # scalar
 
     def _pgt_forward(self, batch, emb_manager=None):
         if emb_manager is None:
