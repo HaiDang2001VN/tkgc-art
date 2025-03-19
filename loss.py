@@ -224,10 +224,10 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
         total_loss = torch.mean(layer_losses)  # scalar
     
     # Compute average unnormalized mean difference
-    avg_mean_diff = torch.mean(mean_diff)  # scalar
+    avg_mean_diff = torch.mean(weighted_diffs)  # scalar
     
-    return total_loss, avg_mean_diff
-    # return avg_mean_diff, total_loss
+    # return total_loss, avg_mean_diff
+    return avg_mean_diff, total_loss
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
     """
