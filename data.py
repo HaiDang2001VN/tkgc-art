@@ -166,7 +166,7 @@ class TemporalDataset(IterableDataset):
             else:
                 cutoff_idx = bisect.bisect_left(timestamps, max_t)
             
-            print("Node: ", current_node, " - Cutoff index: ", cutoff_idx)
+            # print("Node: ", current_node, " - Cutoff index: ", cutoff_idx)
             # Count neighbors added for fan-out constraint
             neighbors_added = 0
             
