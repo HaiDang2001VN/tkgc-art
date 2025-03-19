@@ -85,7 +85,7 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     
     # Handle empty graph
     if adj_matrix.sum() == 0:
-        return torch.tensor(0.0, device=device)
+        return torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)
     
     # Create masks for connected and non-connected nodes (excluding self-connections)
     self_mask = torch.eye(num_nodes, device=device, dtype=torch.bool)  # [num_nodes, num_nodes]
@@ -100,7 +100,7 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     valid_nodes = (connected_counts > 0) & (non_connected_counts > 0)  # [num_nodes]
     
     if valid_nodes.sum() == 0:
-        return torch.tensor(0.0, device=device)
+        return torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)
     
     # Compute all similarity matrices at once
     similarity_matrices = torch.matmul(weighted_embs, weighted_embs.transpose(-2, -1))  # [num_layers, num_nodes, num_nodes]
