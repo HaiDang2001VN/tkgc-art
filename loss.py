@@ -270,8 +270,15 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
     """
     batch_z_score = 0.0
     edge_scores = []
+    valid_sample_count = 0
     
     for emb, mask in zip(final_embeddings, central_masks):
+        # Skip samples with only 2 nodes but still add placeholder score
+        if emb.size(0) <= 2:
+            # Add a zero score for this sample to maintain alignment
+            edge_scores.append(torch.tensor(0.0, device=emb.device))
+            continue
+            
         # Compute similarity matrix (raw dot products normalized by sqrt(d_model))
         similarity_matrix = torch.matmul(emb, emb.T) / math.sqrt(d_model)  # [num_nodes, num_nodes]
         
@@ -316,14 +323,22 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
         # Average z-score for this edge
         edge_z_score = (i_z_score + j_z_score) / 2  # scalar
         batch_z_score += edge_z_score  # scalar
+        valid_sample_count += 1
         
         # Calculate quantile-based edge score for compatibility
         n = similarity_matrix.size(0)  # scalar
         j_quantile_in_i = torch.sum(i_sims <= central_edge_sim).float() / n  # scalar
         i_quantile_in_j = torch.sum(j_sims <= central_edge_sim).float() / n  # scalar
         edge_quantile_score = (j_quantile_in_i + i_quantile_in_j) / 2.0  # scalar
-        edge_scores.append(edge_quantile_score)
+        edge_scores.append(edge_quantile_score.detach())
     
-    avg_z_score = batch_z_score / len(final_embeddings)  # scalar
+    # Handle case where all samples were invalid (had only 2 nodes)
+    if valid_sample_count == 0:
+        device = final_embeddings[0].device if final_embeddings else torch.device('cpu')
+        return torch.tensor(0.0, device=device), edge_scores, torch.tensor(0.0, device=device)
+    
+    # Calculate average z-score only for valid samples
+    avg_z_score = batch_z_score / valid_sample_count  # scalar
+    
     # Return negative z-score as loss (to maximize z-score)
     return -avg_z_score, edge_scores, avg_z_score
