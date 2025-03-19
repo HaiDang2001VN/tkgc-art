@@ -223,11 +223,28 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     else:
         total_loss = torch.mean(layer_losses)  # scalar
     
-    # Compute average unnormalized mean difference
-    avg_mean_diff = torch.mean(mean_diff)  # scalar
+    # Calculate true standard deviation (without +1 stability term)
+    true_std_sq = conn_var + non_conn_var  # [num_layers, num_nodes]
+    eps = 1e-10
+    true_std = torch.sqrt(torch.clamp(true_std_sq, min=eps))  # [num_layers, num_nodes]
     
-    return total_loss, avg_mean_diff
-    # return avg_mean_diff, total_loss
+    # Calculate Welch test statistics
+    welch_stats = mean_diff / true_std  # [num_layers, num_nodes]
+    
+    # Create mask for valid entries (true_std > 0 and valid nodes)
+    valid_welch_mask = (true_std_sq > 1e2 * eps) & valid_nodes_expanded  # [num_layers, num_nodes]
+    
+    # Get the last layer's statistics
+    last_layer_welch = welch_stats[-1]  # [num_nodes]
+    last_layer_valid_mask = valid_welch_mask[-1]  # [num_nodes]
+    
+    # Calculate average Welch statistic for the last layer
+    if last_layer_valid_mask.sum() > 0:
+        avg_last_welch = torch.sum(last_layer_welch * last_layer_valid_mask.float()) / last_layer_valid_mask.sum()
+    else:
+        avg_last_welch = torch.tensor(0.0, device=weighted_embs.device)
+    
+    return total_loss, avg_last_welch
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
     """
