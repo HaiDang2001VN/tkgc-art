@@ -97,7 +97,7 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     non_connected_counts = non_connected_mask.sum(dim=1)  # [num_nodes]
     
     # Create masks for valid comparisons (nodes with both connected and non-connected neighbors)
-    valid_nodes = (connected_counts > 0) & (non_connected_counts > 0)  # [num_nodes]
+    valid_nodes = (connected_counts > 0) & (non_connected_counts > 0) & (connected_counts + non_connected_counts > 2)  # [num_nodes]
     
     if valid_nodes.sum() == 0:
         return torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)
@@ -161,32 +161,32 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     non_conn_sum_sq_dev = torch.sum(non_conn_sq_dev, dim=2)  # [num_layers, num_nodes]
     
     # Calculate variances with proper degrees of freedom
-    valid_conn_var = connected_counts > 1  # [num_nodes]
+    valid_conn_var = connected_counts > 0  # [num_nodes]
     valid_conn_var_expanded = valid_conn_var.unsqueeze(0).expand(num_layers, -1)  # [num_layers, num_nodes]
     
     valid_non_conn_var = non_connected_counts > 0  # [num_nodes]
     valid_non_conn_var_expanded = valid_non_conn_var.unsqueeze(0).expand(num_layers, -1)  # [num_layers, num_nodes]
     
     # Calculate degrees of freedom
-    conn_dof = torch.clamp(conn_counts_expanded, min=1).float()  # [num_layers, num_nodes]
-    non_conn_dof = torch.clamp(non_conn_counts_expanded, min=1).float()  # [num_layers, num_nodes]
+    conn_dof = conn_counts_expanded.float()  # [num_layers, num_nodes]
+    non_conn_dof = non_conn_counts_expanded.float()  # [num_layers, num_nodes]
     
     # Calculate variances with stability handling
     conn_var = torch.where(
         valid_conn_var_expanded,
         conn_sum_sq_dev / conn_dof,
-        torch.ones_like(conn_sum_sq_dev) * 1e-5
+        torch.zeros_like(conn_sum_sq_dev)
     )  # [num_layers, num_nodes]
     
     non_conn_var = torch.where(
         valid_non_conn_var_expanded,
         non_conn_sum_sq_dev / non_conn_dof,
-        torch.ones_like(non_conn_sum_sq_dev) * 1e-5
+        torch.zeros_like(non_conn_sum_sq_dev)
     )  # [num_layers, num_nodes]
     
     # Calculate Welch's standard error (sqrt of sum of weighted variances)
     # SE = sqrt(s₁²/n₁ + s₂²/n₂)
-    pooled_std_sq = conn_var + non_conn_var + 1  # [num_layers, num_nodes]
+    pooled_std_sq = conn_var + non_conn_var  # [num_layers, num_nodes]
     pooled_std = torch.sqrt(pooled_std_sq)  # [num_layers, num_nodes]
     
     # Calculate mean difference (unmasked - masked)
@@ -207,8 +207,8 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     
     # Calculate layer losses with safe division using torch.where instead of boolean indexing
     numerators = torch.sum(weighted_node_losses, dim=1)  # [num_layers]
-    denominators = torch.clamp(pooled_std_sums, min=1e-10).detach()  # [num_layers]
-    valid_layers = pooled_std_sums > 0  # [num_layers]
+    denominators = pooled_std_sums.detach()  # [num_layers]
+    valid_layers = denominators > 1e-3  # [num_layers]
     layer_losses = torch.where(
         valid_layers, 
         numerators / denominators,
@@ -224,26 +224,36 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
         total_loss = torch.mean(layer_losses)  # scalar
     
     # Calculate true standard deviation (without +1 stability term)
-    true_std_sq = conn_var + non_conn_var  # [num_layers, num_nodes]
-    true_std = torch.sqrt(torch.clamp(true_std_sq, min=1e-10))  # [num_layers, num_nodes]
     
     # Calculate Welch test statistics
-    welch_stats = mean_diff / true_std  # [num_layers, num_nodes]
+    welch_stats = mean_diff / pooled_std.detach()  # [num_layers, num_nodes]
     
-    # Create mask for valid entries (true_std > 0 and valid nodes)
-    valid_welch_mask = (true_std_sq > 1e-3) & valid_nodes_expanded  # [num_layers, num_nodes]
+    # Calculate layer-wise average Welch statistics
+    valid_mask_float = valid_nodes_expanded.float()  # [num_layers, num_nodes]
+    valid_counts = torch.sum(valid_mask_float, dim=1)  # [num_layers]
     
-    # Get the last layer's statistics
-    last_layer_welch = welch_stats[-1]  # [num_nodes]
-    last_layer_valid_mask = valid_welch_mask[-1]  # [num_nodes]
+    # Multiply statistics by mask and sum across nodes
+    weighted_stats_sum = torch.sum(welch_stats * valid_mask_float, dim=1)  # [num_layers]
     
-    # Calculate average Welch statistic for the last layer
-    if last_layer_valid_mask.sum() > 0:
-        avg_last_welch = torch.sum(last_layer_welch * last_layer_valid_mask.float()) / last_layer_valid_mask.sum()
+    # Safe division for average (avoiding division by zero)
+    divisor = torch.clamp(valid_counts, min=1.0)  # [num_layers] 
+    layer_avg_welch = torch.where(
+        valid_counts > 0,
+        weighted_stats_sum / divisor,
+        torch.zeros_like(weighted_stats_sum)
+    )  # [num_layers]
+    
+    # Calculate layer-weighted average Welch statistic
+    if layer_weight_tensor is not None:
+        # Use the same normalized weights as for the loss
+        norm_layer_weights = layer_weight_tensor / layer_weight_tensor.sum()  # [num_layers]
+        avg_mean_welch = torch.sum(layer_avg_welch * norm_layer_weights)  # scalar
     else:
-        avg_last_welch = torch.tensor(0.0, device=weighted_embs.device)
+        # Simple average across layers
+        avg_mean_welch = torch.mean(layer_avg_welch)  # scalar
     
-    return total_loss, avg_last_welch
+    # return total_loss, avg_mean_welch
+    return avg_mean_welch, total_loss
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
     """
