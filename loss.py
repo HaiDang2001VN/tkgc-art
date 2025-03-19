@@ -164,12 +164,12 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     valid_conn_var = connected_counts > 1  # [num_nodes]
     valid_conn_var_expanded = valid_conn_var.unsqueeze(0).expand(num_layers, -1)  # [num_layers, num_nodes]
     
-    valid_non_conn_var = non_connected_counts > 1  # [num_nodes]
+    valid_non_conn_var = non_connected_counts > 0  # [num_nodes]
     valid_non_conn_var_expanded = valid_non_conn_var.unsqueeze(0).expand(num_layers, -1)  # [num_layers, num_nodes]
     
     # Calculate degrees of freedom
-    conn_dof = torch.clamp(conn_counts_expanded - 1, min=1).float()  # [num_layers, num_nodes]
-    non_conn_dof = torch.clamp(non_conn_counts_expanded - 1, min=1).float()  # [num_layers, num_nodes]
+    conn_dof = torch.clamp(conn_counts_expanded, min=1).float()  # [num_layers, num_nodes]
+    non_conn_dof = torch.clamp(non_conn_counts_expanded, min=1).float()  # [num_layers, num_nodes]
     
     # Calculate variances with stability handling
     conn_var = torch.where(
@@ -186,8 +186,8 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     
     # Calculate Welch's standard error (sqrt of sum of weighted variances)
     # SE = sqrt(s₁²/n₁ + s₂²/n₂)
-    pooled_std_sq = (conn_var / conn_counts_expanded.float()) + (non_conn_var / non_conn_counts_expanded.float())  # [num_layers, num_nodes]
-    pooled_std = torch.sqrt(pooled_std_sq + 1e-10)  # [num_layers, num_nodes]
+    pooled_std_sq = conn_var + non_conn_var + 1  # [num_layers, num_nodes]
+    pooled_std = torch.sqrt(pooled_std_sq)  # [num_layers, num_nodes]
     
     # Calculate mean difference (unmasked - masked)
     # We want to maximize the difference between non-connected and connected similarities
