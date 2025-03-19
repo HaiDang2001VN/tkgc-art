@@ -203,11 +203,11 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     weighted_node_losses = weighted_diffs * valid_nodes_expanded.float()  # [num_layers, num_nodes]
     
     # Calculate sum of pooled std across valid nodes for each layer (using detached pooled_std)
-    pooled_std_sums = torch.sum(pooled_std.detach() * valid_nodes_expanded.float(), dim=1)  # [num_layers]
+    pooled_std_sums = torch.sum(pooled_std * valid_nodes_expanded.float(), dim=1)  # [num_layers]
     
     # Calculate layer losses with safe division using torch.where instead of boolean indexing
     numerators = torch.sum(weighted_node_losses, dim=1)  # [num_layers]
-    denominators = torch.clamp(pooled_std_sums, min=1e-10)  # [num_layers]
+    denominators = torch.clamp(pooled_std_sums, min=1e-10).detach()  # [num_layers]
     valid_layers = pooled_std_sums > 0  # [num_layers]
     layer_losses = torch.where(
         valid_layers, 
@@ -226,8 +226,8 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     # Compute average unnormalized mean difference
     avg_mean_diff = torch.mean(mean_diff)  # scalar
     
-    # return total_loss, avg_mean_diff
-    return avg_mean_diff, total_loss
+    return total_loss, avg_mean_diff
+    # return avg_mean_diff, total_loss
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model):
     """
