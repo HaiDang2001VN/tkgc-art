@@ -149,8 +149,8 @@ class TemporalDataset(IterableDataset):
             current_node, current_dist = queue.popleft()
             hop_cnt[current_dist] += 1
             
-            if current_dist > k_hops:
-                continue
+            if current_dist == k_hops:
+                break
             
             # Get node's adjacency list
             adj_nodes = self.adj_list[current_node]
