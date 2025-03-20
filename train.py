@@ -139,7 +139,7 @@ class UnifiedTrainer(L.LightningModule):
             # Process PGT embeddings with similarity type
             pgt_loss, pgt_scores, raw_z_score = self._pgt_forward(batch['pgt'], emb_manager, similarity_type)
         else:
-            pgt_loss = torch.tensor(0.0, device=self.device)
+            pgt_loss = torch.tensor(0.0, device=self.device, requires_grad=False)
             pgt_scores = {}
             raw_z_score = torch.tensor(0.0, device=self.device)
 
@@ -147,7 +147,7 @@ class UnifiedTrainer(L.LightningModule):
         if batch['meta']['is_group_end']:
             emb_manager.transition_timestamp()
 
-        # Compute total loss
+        # Compute total loss with grad
         print(f"DGT loss: {dgt_loss}")
         print(f"PGT loss: {pgt_loss}")
         total_loss = dgt_loss + pgt_loss
@@ -333,7 +333,7 @@ class UnifiedTrainer(L.LightningModule):
                 mean_diffs.append(mean_diff)
             
         if len(losses) == 0:
-            return torch.tensor(0.0), torch.tensor(0.0)
+            return torch.tensor(0.0, device=self.device, requires_grad=True), torch.tensor(0.0, device=self.device)
         
         return torch.mean(torch.stack(losses)), torch.mean(torch.stack(mean_diffs))
 

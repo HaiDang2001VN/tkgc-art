@@ -346,7 +346,7 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model, similarity_type='
     # Handle case where all samples were invalid (had only 2 nodes)
     if valid_sample_count == 0:
         device = final_embeddings[0].device if final_embeddings else torch.device('cpu')
-        return torch.tensor(0.0, device=device), edge_scores, torch.tensor(0.0, device=device)
+        return torch.tensor(0.0, device=device, requires_grad=True), edge_scores, torch.tensor(0.0, device=device)
     
     # Calculate average z-score only for valid samples
     avg_z_score = batch_z_score / valid_sample_count  # scalar
