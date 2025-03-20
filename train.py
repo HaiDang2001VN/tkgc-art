@@ -521,7 +521,7 @@ if __name__ == "__main__":
     # Extract wandb configuration or use defaults
     wandb_config = {
         "project": config['training'].get('wandb_project', "temporal-graph-learning"),
-        "name": config['training'].get('wandb_name', f"{experiment_name}_{timestamp}_{config['training']['predictive']}-{config["training"]["similarity_type"]}"),
+        "name": config['training'].get('wandb_name', f"{experiment_name}_{timestamp}_{config['training']['predictive']}-{config['training']['similarity_type']}"),
         "group": config['training'].get('wandb_group', None),
         "tags": config['training'].get('wandb_tags', []),
         "log_model": config['training'].get('wandb_log_model', "all"),
