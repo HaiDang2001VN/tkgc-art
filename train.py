@@ -148,10 +148,10 @@ class UnifiedTrainer(L.LightningModule):
             emb_manager.transition_timestamp()
 
         # Compute total loss with grad
-        print(f"DGT loss: {dgt_loss}")
-        print(f"PGT loss: {pgt_loss}")
+        # print(f"DGT loss: {dgt_loss}")
+        # print(f"PGT loss: {pgt_loss}")
         total_loss = dgt_loss + pgt_loss
-        print(f"Total loss: {total_loss}")
+        # print(f"Total loss: {total_loss}")
         
         return {
             'dgt_loss': dgt_loss,
@@ -328,7 +328,7 @@ class UnifiedTrainer(L.LightningModule):
                     for i, node in enumerate(nodes):
                         emb_manager.update_embeddings(node, last_layer_weighted[i])
                 
-                print(loss_val)
+                # print(loss_val)
                 losses.append(loss_val)
                 mean_diffs.append(mean_diff)
             
