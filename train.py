@@ -487,7 +487,7 @@ if __name__ == "__main__":
     import wandb
     from lightning.pytorch.loggers import WandbLogger
     
-    with open("config.json") as f:
+    with open("src/config.json") as f:
         config = json.load(f)
         
     print("Config: ", config)
