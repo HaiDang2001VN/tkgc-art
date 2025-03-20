@@ -30,7 +30,7 @@
         "strategy": null,
         "precision": 32,
         "predictive": true,
-        "similarity_type": "inner",
+        "similarity_type": "cosine",
         "log_freq": 5,
         "log_flush": 50,
         "fan_out": 30,
