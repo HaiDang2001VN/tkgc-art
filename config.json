@@ -35,7 +35,7 @@
         "log_flush": 50,
         "fan_out": 30,
         "degree_sort": "decreasing",
-        "ckpt_dir": "../checkpoints",
+        "ckpt_dir": "checkpoints",
         "ckpt_name": "model",
         "ckpt_freq": 1,
         "ckpt_keep": 1,
@@ -47,7 +47,7 @@
     },
     "data": {
         "name": "ogbl-collab",
-        "path": "../data",
+        "path": "data",
         "random_seed": 42,
         "edge_time": "year",
         "directionality": "bi",

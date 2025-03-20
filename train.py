@@ -1,15 +1,22 @@
 # train.py
-import lightning as L
+import os
+import json
+import argparse
+import shutil
+import numpy as np
+from datetime import datetime
+
 import torch
 from torch.utils.data import DataLoader
+import wandb
+import lightning as L
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
+from sklearn.metrics import roc_auc_score
+from ogb.linkproppred import Evaluator
+
 from data import TemporalDataset
 from models import DGT, PGT, TemporalEmbeddingManager
 from loss import compute_dgt_loss, compute_pgt_loss, adaptive_update_multi_layer
-from ogb.linkproppred import Evaluator
-import numpy as np
-from lightning.pytorch.loggers import CSVLogger  # Import CSVLogger
-import os
-from datetime import datetime
 
 class SyncedGraphDataModule(L.LightningDataModule):
     def __init__(self, config):
@@ -315,6 +322,7 @@ class UnifiedTrainer(L.LightningModule):
                 for i, node in enumerate(nodes):
                     emb_manager.update_embeddings(node, last_layer_weighted[i])
             
+            print(loss_val)
             losses.append(loss_val)
             mean_diffs.append(mean_diff)
             
@@ -483,11 +491,14 @@ class UnifiedTrainer(L.LightningModule):
 
 
 if __name__ == "__main__":
-    import json
-    import wandb
-    from lightning.pytorch.loggers import WandbLogger
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Train temporal graph models')
+    parser.add_argument('--config', type=str, default='src/config.json',
+                        help='Path to the configuration file')
+    args = parser.parse_args()
     
-    with open("src/config.json") as f:
+    # Load configuration from specified path
+    with open(args.config) as f:
         config = json.load(f)
         
     print("Config: ", config)
