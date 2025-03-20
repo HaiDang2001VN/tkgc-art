@@ -325,7 +325,7 @@ class UnifiedTrainer(L.LightningModule):
                     for i, node in enumerate(nodes):
                         emb_manager.update_embeddings(node, last_layer_weighted[i])
                 
-                print(loss_val)
+                # print(loss_val)
                 losses.append(loss_val)
                 mean_diffs.append(mean_diff)
             

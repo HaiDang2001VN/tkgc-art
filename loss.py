@@ -104,12 +104,11 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None, simila
         return None
     
     # Compute all similarity matrices using the specified similarity type
-    # similarity_matrices = compute_similarity_matrix(
-    #     weighted_embs, 
-    #     similarity_type, 
-    #     emb_dim
-    # )  # [num_layers, num_nodes, num_nodes]
-    similarity_matrices = torch.zeros(num_layers, num_nodes, num_nodes, device=device)
+    similarity_matrices = compute_similarity_matrix(
+        weighted_embs, 
+        similarity_type, 
+        emb_dim
+    )  # [num_layers, num_nodes, num_nodes]
     
     # Calculate means for connected nodes
     # First expand masks for broadcasting with layers
