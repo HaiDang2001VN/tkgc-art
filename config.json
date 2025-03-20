@@ -29,7 +29,7 @@
         "pin_memory": true,
         "strategy": null,
         "precision": 32,
-        "predictive": true,
+        "predictive": false,
         "similarity_type": "inner",
         "log_freq": 5,
         "log_flush": 50,
