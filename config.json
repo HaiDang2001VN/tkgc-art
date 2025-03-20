@@ -30,6 +30,7 @@
         "strategy": null,
         "precision": 32,
         "predictive": true,
+        "similarity_type": "inner",
         "log_freq": 5,
         "log_flush": 50,
         "fan_out": 30,
@@ -37,7 +38,12 @@
         "ckpt_dir": "../checkpoints",
         "ckpt_name": "model",
         "ckpt_freq": 1,
-        "ckpt_keep": 1
+        "ckpt_keep": 1,
+        "wandb_project": "temporal-graph-learning",
+        "wandb_name": "dgt_pgt_experiment",
+        "wandb_group": "similarity_comparison",
+        "wandb_tags": ["temporal", "graph", "transformer"],
+        "wandb_log_model": "all"
     },
     "data": {
         "name": "ogbl-collab",

@@ -122,12 +122,15 @@ class UnifiedTrainer(L.LightningModule):
         if emb_manager is None:
             emb_manager = self.emb_manager
         
-        # Process DGT embeddings
-        dgt_loss, mean_diff = self._dgt_forward(batch['dgt'], emb_manager)
+        # Get similarity type from config
+        similarity_type = self.config['training'].get('similarity_type', 'inner')
+        
+        # Process DGT embeddings with similarity type
+        dgt_loss, mean_diff = self._dgt_forward(batch['dgt'], emb_manager, similarity_type)
         
         if self.predictive:
-            # Process PGT embeddings
-            pgt_loss, pgt_scores, raw_z_score = self._pgt_forward(batch['pgt'], emb_manager)
+            # Process PGT embeddings with similarity type
+            pgt_loss, pgt_scores, raw_z_score = self._pgt_forward(batch['pgt'], emb_manager, similarity_type)
         else:
             pgt_loss = torch.tensor(0.0)
             pgt_scores = {}
@@ -249,13 +252,14 @@ class UnifiedTrainer(L.LightningModule):
             'labels': batch.get('labels', None)
         }
 
-    def _dgt_forward(self, batch, emb_manager=None):
+    def _dgt_forward(self, batch, emb_manager=None, similarity_type='inner'):
         """
         Forward pass for DGT model using adaptive weighted embeddings
         
         Args:
             batch: List of dictionaries with graph data
             emb_manager: Embedding manager for retrieving and updating node embeddings
+            similarity_type: Type of similarity to use ('inner' or 'cosine')
             
         Returns:
             Mean loss across batch (scalar)
@@ -297,7 +301,8 @@ class UnifiedTrainer(L.LightningModule):
             loss_val, mean_diff = compute_dgt_loss(
                 weighted_embs,  # [num_layers, num_nodes, dim]
                 adj,  # [num_nodes, num_nodes]
-                layer_weight_tensor  # [num_layers]
+                layer_weight_tensor,  # [num_layers]
+                similarity_type  # Pass similarity type
             )
             
             # For positive edges, update the embeddings using the last layer
@@ -315,7 +320,7 @@ class UnifiedTrainer(L.LightningModule):
             
         return torch.mean(torch.stack(losses)), torch.mean(torch.stack(mean_diffs))
 
-    def _pgt_forward(self, batch, emb_manager=None):
+    def _pgt_forward(self, batch, emb_manager=None, similarity_type='inner'):
         if emb_manager is None:
             emb_manager = self.emb_manager
             
@@ -338,7 +343,7 @@ class UnifiedTrainer(L.LightningModule):
             masks.append(mask)
 
         # Compute PGT loss and get edge scores and raw z-score
-        pgt_loss, edge_scores, raw_z_score = compute_pgt_loss(final_embs, masks, self.config['models']['PGT']['d_model'])
+        pgt_loss, edge_scores, raw_z_score = compute_pgt_loss(final_embs, masks, self.config['models']['PGT']['d_model'], similarity_type)
         
         # Return labels along with scores if available
         if labels:
@@ -479,6 +484,9 @@ class UnifiedTrainer(L.LightningModule):
 
 if __name__ == "__main__":
     import json
+    import wandb
+    from lightning.pytorch.loggers import WandbLogger
+    
     with open("config.json") as f:
         config = json.load(f)
         
@@ -488,14 +496,25 @@ if __name__ == "__main__":
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_name = config.get('experiment_name', 'temporal_graph_learning')
     log_dir = os.path.join("logs", f"{experiment_name}_{timestamp}")
+    os.makedirs(log_dir, exist_ok=True)
     
-    # Create CSV logger
-    logger = CSVLogger(
-        save_dir=log_dir,
-        name="metrics",
-        flush_logs_every_n_steps=config['training']['log_flush']  # Flush to disk frequently
-    )
-    print(f"Logging metrics to: {logger.log_dir}")
+    # Extract wandb configuration or use defaults
+    wandb_config = {
+        "project": config['training'].get('wandb_project', "temporal-graph-learning"),
+        "name": config['training'].get('wandb_name', f"{experiment_name}_{timestamp}"),
+        "group": config['training'].get('wandb_group', None),
+        "tags": config['training'].get('wandb_tags', []),
+        "log_model": config['training'].get('wandb_log_model', "all"),
+        "save_dir": log_dir,
+    }
+    
+    # Create wandb logger
+    logger = WandbLogger(**wandb_config)
+    
+    # Log hyperparameters to wandb
+    logger.log_hyperparams(config)
+    
+    print(f"Logging metrics to wandb project: {wandb_config['project']}, run: {wandb_config['name']}")
     
     print("Creating datamodule...")
     datamodule = SyncedGraphDataModule(config)
@@ -509,9 +528,9 @@ if __name__ == "__main__":
         accelerator=config['training']['accelerator'],
         devices=config['training']['devices'],
         log_every_n_steps=config['training']["log_freq"],
-        logger=logger,  # Add CSV logger
+        logger=logger,  # Use wandb logger
         enable_checkpointing=True,
-        default_root_dir=log_dir  # Store checkpoints in the same directory
+        default_root_dir=log_dir
     )
     print("Fitting model...")
     trainer.fit(model, datamodule=datamodule)
@@ -525,3 +544,6 @@ if __name__ == "__main__":
     config_path = os.path.join(log_dir, "config.json")
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
+    
+    # Close wandb run
+    wandb.finish()

@@ -58,7 +58,7 @@ def adaptive_update_multi_layer(old_emb, intermediate_outputs, distance, layer_w
     
     return weighted_embs, layer_weight_tensor, layer_indices
 
-def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
+def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None, similarity_type='inner'):
     """
     Compute DGT loss based on adaptively weighted embeddings
     
@@ -67,6 +67,7 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
                       Either [num_layers, num_nodes, dim] or [num_nodes, dim]
         adj_matrix: Adjacency matrix [num_nodes, num_nodes]
         layer_weight_tensor: Layer weights tensor [num_layers] or None
+        similarity_type: Type of similarity to use ('inner' or 'cosine')
     
     Returns:
         Total loss value [scalar]
@@ -80,7 +81,7 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
             layer_weight_tensor = torch.ones(1, device=weighted_embs.device)
     
     # Get dimensions
-    num_layers, num_nodes, _ = weighted_embs.shape
+    num_layers, num_nodes, emb_dim = weighted_embs.shape
     device = weighted_embs.device
     
     # Handle empty graph
@@ -102,8 +103,12 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     if valid_nodes.sum() == 0:
         return torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)
     
-    # Compute all similarity matrices at once
-    similarity_matrices = torch.matmul(weighted_embs, weighted_embs.transpose(-2, -1))  # [num_layers, num_nodes, num_nodes]
+    # Compute all similarity matrices using the specified similarity type
+    similarity_matrices = compute_similarity_matrix(
+        weighted_embs, 
+        similarity_type, 
+        emb_dim
+    )  # [num_layers, num_nodes, num_nodes]
     
     # Calculate means for connected nodes
     # First expand masks for broadcasting with layers
@@ -255,7 +260,7 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None):
     # return total_loss, avg_mean_welch
     return avg_mean_welch, total_loss
 
-def compute_pgt_loss(final_embeddings, central_masks, d_model):
+def compute_pgt_loss(final_embeddings, central_masks, d_model, similarity_type='inner'):
     """
     Compute PGT loss using z-scores of central edge similarities
     
@@ -263,6 +268,7 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
         final_embeddings: List of embeddings tensors, each [num_nodes, dim]
         central_masks: List of boolean masks indicating central nodes
         d_model: Model dimension for normalization
+        similarity_type: Type of similarity to use ('inner' or 'cosine')
         
     Returns:
         loss: Negative average z-score (scalar)
@@ -279,8 +285,12 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
             edge_scores.append(torch.tensor(0.0, device=emb.device))
             continue
             
-        # Compute similarity matrix (raw dot products normalized by sqrt(d_model))
-        similarity_matrix = torch.matmul(emb, emb.T) / math.sqrt(d_model)  # [num_nodes, num_nodes]
+        # Compute similarity matrix using the specified similarity type
+        similarity_matrix = compute_similarity_matrix(
+            emb, 
+            similarity_type, 
+            d_model
+        )  # [num_nodes, num_nodes]
         
         # Get central node indices
         central_indices = torch.where(mask)[0]  # [2]
@@ -342,3 +352,26 @@ def compute_pgt_loss(final_embeddings, central_masks, d_model):
     
     # Return negative z-score as loss (to maximize z-score)
     return -avg_z_score, edge_scores, avg_z_score
+
+def compute_similarity_matrix(embeddings, similarity_type, d_model=None):
+    """
+    Compute similarity matrix based on specified type
+    
+    Args:
+        embeddings: Embeddings tensor [..., num_nodes, dim]
+        similarity_type: Type of similarity ('inner' or 'cosine')
+        d_model: Model dimension for normalization (only used for inner product)
+        
+    Returns:
+        Similarity matrix [..., num_nodes, num_nodes]
+    """
+    if similarity_type == 'cosine':
+        # Normalize embeddings and compute cosine similarity
+        normalized_embs = F.normalize(embeddings, p=2, dim=-1)
+        return torch.matmul(normalized_embs, normalized_embs.transpose(-2, -1))
+    else:  # Default to inner product
+        # Compute inner product similarity normalized by sqrt(d_model)
+        sim = torch.matmul(embeddings, embeddings.transpose(-2, -1))
+        if d_model is not None:
+            sim = sim / math.sqrt(d_model)
+        return sim
