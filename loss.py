@@ -258,8 +258,8 @@ def compute_dgt_loss(weighted_embs, adj_matrix, layer_weight_tensor=None, simila
         avg_mean_welch = torch.mean(layer_avg_welch)  # scalar
     
     # return total_loss, avg_mean_welch
-    # return avg_mean_welch, total_loss
-    return torch.mean(mean_diff), total_loss
+    return avg_mean_welch, total_loss
+    # return torch.mean(mean_diff), total_loss
 
 def compute_pgt_loss(final_embeddings, central_masks, d_model, similarity_type='inner'):
     """
