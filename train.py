@@ -305,26 +305,29 @@ class UnifiedTrainer(L.LightningModule):
             
             # Compute loss using the adaptively weighted embeddings
             # Returns both loss and mean diff
-            loss_val, mean_diff = compute_dgt_loss(
+            result = compute_dgt_loss(
                 weighted_embs,  # [num_layers, num_nodes, dim]
                 adj,  # [num_nodes, num_nodes]
                 layer_weight_tensor,  # [num_layers]
                 similarity_type  # Pass similarity type
             )
             
-            # For positive edges, update the embeddings using the last layer
-            if is_positive:
-                # Find the index of the last layer in our ordered layers
-                last_layer_idx = layer_indices.index(self.last_layer)
-                # Use the weighted embeddings for the last layer [num_nodes, dim]
-                last_layer_weighted = weighted_embs[last_layer_idx]
+            if result is not None:
+                loss_val, mean_diff = result
                 
-                for i, node in enumerate(nodes):
-                    emb_manager.update_embeddings(node, last_layer_weighted[i])
-            
-            print(loss_val)
-            losses.append(loss_val)
-            mean_diffs.append(mean_diff)
+                # For positive edges, update the embeddings using the last layer
+                if is_positive:
+                    # Find the index of the last layer in our ordered layers
+                    last_layer_idx = layer_indices.index(self.last_layer)
+                    # Use the weighted embeddings for the last layer [num_nodes, dim]
+                    last_layer_weighted = weighted_embs[last_layer_idx]
+                    
+                    for i, node in enumerate(nodes):
+                        emb_manager.update_embeddings(node, last_layer_weighted[i])
+                
+                print(loss_val)
+                losses.append(loss_val)
+                mean_diffs.append(mean_diff)
             
         return torch.mean(torch.stack(losses)), torch.mean(torch.stack(mean_diffs))
 
