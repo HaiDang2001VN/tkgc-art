@@ -329,6 +329,9 @@ class UnifiedTrainer(L.LightningModule):
                 losses.append(loss_val)
                 mean_diffs.append(mean_diff)
             
+        if len(losses) == 0:
+            return torch.tensor(0.0), torch.tensor(0.0)
+        
         return torch.mean(torch.stack(losses)), torch.mean(torch.stack(mean_diffs))
 
     def _pgt_forward(self, batch, emb_manager=None, similarity_type='inner'):
