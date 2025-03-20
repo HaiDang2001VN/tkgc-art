@@ -40,7 +40,6 @@
         "ckpt_freq": 1,
         "ckpt_keep": 1,
         "wandb_project": "temporal-graph-learning",
-        "wandb_name": "dgt_pgt_experiment",
         "wandb_group": "similarity_comparison",
         "wandb_tags": ["temporal", "graph", "transformer"],
         "wandb_log_model": "all"
