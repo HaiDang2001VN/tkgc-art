@@ -11,6 +11,8 @@ class DGT(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config['d_model'],
             nhead=config['nhead'],
+            dim_feedforward=config['dim_ffn'],
+            activation=config['activation'],
             batch_first=True
         )
         self.transformer = nn.TransformerEncoder(
@@ -40,6 +42,8 @@ class PGT(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config['d_model'],
             nhead=config['nhead'],
+            dim_feedforward=config['dim_ffn'],
+            activation=config['activation'],
             batch_first=True
         )
         self.transformer = nn.TransformerEncoder(

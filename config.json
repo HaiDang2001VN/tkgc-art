@@ -8,13 +8,17 @@
                 "7": 0.1,
                 "9": 0.2,
                 "11": 0.7
-            }
+            },
+            "dim_ffn": 128,
+            "activation": "gelu"
         },
         "PGT": {
             "d_model": 64,
             "nhead": 4,
             "num_layers": 8,
-            "current_inclusive": false
+            "current_inclusive": false,
+            "dim_ffn": 128,
+            "activation": "gelu"
         }
     },
     "training": {
