@@ -19,7 +19,7 @@
     },
     "training": {
         "lr": 0.005,
-        "batch_size": 32,
+        "batch_size": 64,
         "num_workers": 8,
         "k_hops": 2,
         "num_epochs": 3,
@@ -33,7 +33,7 @@
         "similarity_type": "cosine",
         "log_freq": 5,
         "log_flush": 50,
-        "fan_out": 50,
+        "fan_out": 100,
         "degree_sort": "decreasing",
         "ckpt_dir": "checkpoints",
         "ckpt_name": "model",
