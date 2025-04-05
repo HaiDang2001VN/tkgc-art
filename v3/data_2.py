@@ -17,9 +17,9 @@ class TemporalDataset(IterableDataset):
         
         self.graph             = self._create_graph(config['data']['edge_time'], config['data']['neg_multiplier'])
         self.adjacent          = self._build_temporal_adjacency_lists(config['training'].get('degree_sort', 'descending'))
+        self.embedding_manager = EmbeddingManager(self.graph, config['training'], node_dim)
         self.temporal_groups   = self._create_temporal_groups()
 		
-        self.embedding_manager = EmbeddingManager(self.graph['num_nodes'], node_dim)
         self.k                 = k if k != None else config['training']['k_hops']
         self.m_d               = m_d if m_d != None else config['training']['max_degree']
         
@@ -28,6 +28,8 @@ class TemporalDataset(IterableDataset):
         print('[GRAPH] Start building graph\n\n')
         
         edge_splits = self.dataset.get_edge_split()
+        
+        print(f'[GRAPH] There are {self.dataset[0].num_nodes} nodes in the dataset.\n\n')
         
         print('[GRAPH] Splits:\n' + '\n'.join(f"- {split[0]}: {split[1]['edge'].shape[0]} edges \
 (bonus negative edges: {split[1]['edge_neg'].shape[0] if 'edge_neg' in split[1] else 0})" for split in edge_splits.items()) + '\n\n')
@@ -40,7 +42,7 @@ class TemporalDataset(IterableDataset):
             
             actual_neg_multiplier = min(neg_multiplier, len(unique_timestamps))
             
-            neg_edges = split['edge_neg'].repeat_interleave(actual_neg_multiplier, dim=1)
+            neg_edges = split['edge_neg'].repeat_interleave(actual_neg_multiplier, dim=0)
             
             timestamp_permutaion = torch.stack([
                 torch.randperm(len(unique_timestamps))[:actual_neg_multiplier]
@@ -130,8 +132,13 @@ class TemporalDataset(IterableDataset):
                     
             for node, degree_increase in degree_updates.items():
                 node_degrees[node] += degree_increase
+                
+        self.graph['node_degrees'] = list(node_degrees.values())
         
         print('\n')
+        
+        degrees = torch.tensor(list(node_degrees.values()), dtype=torch.float32)
+        print(f'[ADJAC] Max node degree: {degrees.max()}, Mean degree: {degrees.mean():.5f}, Median degree: {degrees.median()}\n\n')
         
         print('[ADJAC] Sort adjacent nodes by timestamp then by degree\n')
         
@@ -163,7 +170,7 @@ class TemporalDataset(IterableDataset):
                 key = int(timestamp.item())
                 groups[key].append(idx)
                 
-            print(f'[TEMPG] Found {len(groups.keys())} timestamps\n')
+            print(f'[TEMPG] Found {len(groups.keys())} timestamps: {list(groups.keys())}\n')
                 
             sorted_groups = sorted(groups.items(), key=lambda x: x[0])
             temporal_group = []
@@ -191,7 +198,7 @@ class TemporalDataset(IterableDataset):
         current_worker_id = worker_info.id if worker_info else 0
 
         counter = 0
-        for group in self.temporal_groups[self.split][1:]:
+        for group in self.temporal_groups[self.split]:
             timestamp = group['timestamp']
             
             for idx, edge in enumerate(group['edges']):
@@ -200,7 +207,7 @@ class TemporalDataset(IterableDataset):
                 
                 paths  = torch.empty((0, self.k+1), dtype=torch.int32)
                 masks  = torch.empty((0, self.k+1), dtype=torch.int8)
-                labels = torch.empty((0, 1), dtype=torch.int8)
+                labels = torch.empty((0, 1), dtype=torch.int32)
                 tokens = torch.empty((0, self.k+1, self.embedding_manager.node_dim))
                 
                 path_list = self._temporal_bfs(edge[0], timestamp) + self._temporal_bfs(edge[1], timestamp)
@@ -215,6 +222,7 @@ class TemporalDataset(IterableDataset):
                     tokens = torch.cat((tokens, path['tokens'].unsqueeze(dim=0)))
                 
                 yield {
+                    'central_edge': edge,
                     'paths': paths,
                     'masks': masks,
                     'labels': labels,
@@ -230,17 +238,19 @@ class TemporalDataset(IterableDataset):
         dist            = torch.zeros(n, dtype=torch.int32) - 1
         prev            = torch.zeros(n, dtype=torch.int32) - 1
         
-        path_embeddings = torch.zeros((n, self.embedding_manager.node_dim))
+        # path_embeddings = torch.zeros((n, self.embedding_manager.node_dim))
         path_scores     = torch.zeros(n)
         
         dist[src] = 0
-        path_embeddings[src] = self.embedding_manager.get_embedding(src)       
+        # path_embeddings[src] = self.embedding_manager.get_embedding(src)       
         
         queue = deque([src])
         
         time_check = lambda t: t < timestamp or (current_inclusive and t == timestamp)
         
         best_paths = []
+        
+        path_count = 0
         
         while queue:
             current_node = queue.popleft()
@@ -249,34 +259,52 @@ class TemporalDataset(IterableDataset):
                 break
             
             for neighbour in self.adjacent[current_node]:
-                if dist[neighbour[0]] == -1 and time_check(neighbour[1]):
-                    queue.append(neighbour[0])
+                neighbour_node = neighbour[0]
+                neighbour_timestamp = neighbour[1]
+                                
+                if dist[neighbour_node] == -1 and time_check(neighbour_timestamp):
+                    queue.append(neighbour_node)
                     
-                    dist[neighbour[0]] = dist[current_node] + 1
-                    prev[neighbour[0]] = current_node
+                    path_count += 1
                     
-                    path_embeddings[neighbour[0]] = self.embedding_manager.update_path_embedding(
-                        path_embeddings[current_node], self.embedding_manager.get_embedding(neighbour[0])
+                    dist[neighbour_node] = dist[current_node] + 1
+                    prev[neighbour_node] = current_node
+                    
+                    # path_embeddings[neighbour_node] = self.embedding_manager.update_path_embedding(
+                    #     path_embeddings[current_node], self.embedding_manager.get_embedding(neighbour_node)
+                    # )
+                    path_scores[neighbour_node] = self.embedding_manager.score(
+                        self.embedding_manager.get_embedding(src) + dist[neighbour_node] * self.embedding_manager.get_relation_embedding(),
+                        self.embedding_manager.get_embedding(neighbour_node)
                     )
-                    path_scores[neighbour[0]] = self.embedding_manager.score(
-                        path_embeddings[current_node], self.embedding_manager.get_embedding(neighbour[0])
-                    )
                     
-                    heapq.heappush(best_paths, (path_scores[neighbour[0]], neighbour[0]))
-                    
+                    heapq.heappush(best_paths, (path_scores[neighbour_node], neighbour_node))
+                   
+        print(f'[TPBFS] Found {path_count} paths')
+            
         ret = []
+        
+        dst_label = {}
         
         for (score, dst) in best_paths[:self.m_d]:            
             (path, mask) = self._trace_path(dst, prev)
             tokens = self.embedding_manager.get_path_tokens(path, mask)
-            label = self._is_edge_formed_after_timestamp([path[0], path[-1]], timestamp)
+            
+            actual_path = path[mask == 1]
+            dst_label[actual_path[-1].item()] = False
             
             ret.append({
+                'source': src,
+                'destination': actual_path[-1].item(),
                 'path': path,
                 'mask': mask,
-                'tokens': tokens,
-                'label': torch.tensor([label], dtype=torch.int8)
+                'tokens': tokens
             })
+            
+        dst_label = self._is_edge_formed_after_timestamp(src, dst_label, timestamp)
+        
+        for path in ret:
+            path['label'] = torch.tensor([1 if dst_label[path['destination']] else 0])
             
         return ret
     
@@ -298,9 +326,9 @@ class TemporalDataset(IterableDataset):
         return (path, mask)
     
     
-    def _is_edge_formed_after_timestamp(self, edge, timestamp, current_inclusive: bool = True) -> 0 | 1:
-        for adj in self.adjacent[edge[0]]:
-            if adj[0] == edge[1] and (adj[1] > timestamp or (adj[1] == timestamp and current_inclusive)):
-                return 1
-            
-        return 0
+    def _is_edge_formed_after_timestamp(self, src, dst_label, timestamp, current_inclusive: bool = True) -> 0 | 1:
+        for adj in self.adjacent[src]:
+            if adj[0] in dst_label and (adj[1].item() > timestamp or (adj[1].item() == timestamp and current_inclusive)):
+                dst_label[adj[0]] = True
+    
+        return dst_label
