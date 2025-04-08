@@ -55,8 +55,9 @@
         "name": "ogbl-collab",
         "path": "data",
         "random_seed": 42,
-        "edge_time": "year",
+        "timestamp_label": "year",
         "directionality": "bi",
-        "neg_multiplier": 0
+        "neg_multiplier": 0,
+        "base_ratio": 0.7
     }
 }

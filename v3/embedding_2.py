@@ -142,7 +142,7 @@ class EmbeddingDataLoader:
         self.reset()
         
     def reset(self):
-        self.train_edges = np.random.permutation(len(self.graph['splits']['train']))
+        self.train_edges = np.random.permutation(len(self.graph['splits']['base']))
         self.cur_edge_i = 0
     
     def has_next(self):
