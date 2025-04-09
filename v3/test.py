@@ -23,6 +23,8 @@ checkpoint_pos_count = 0
 checkpoint_pos_found = 0
 
 for data in tqdm(dataset):
+    # Print position of non zero value
+    print(data['central_edge'].nonzero(as_tuple=True))
     total += data['paths'].shape[0]
     positive_count += data['labels'].sum()
     negative_count += data['labels'].shape[0] - data['labels'].sum()

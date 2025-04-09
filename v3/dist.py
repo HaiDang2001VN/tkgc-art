@@ -65,4 +65,6 @@ class NTPLoss(torch.nn.Module):
 
         # binary_labels assumed to be float tensor of shape [batch] (1 for positive, 0 for negative)
         loss = binary_labels * pos_loss + (1.0 - binary_labels) * neg_loss
-        return loss.mean()
+        
+        # Return per-sample losses
+        return loss

@@ -72,6 +72,8 @@ class EmbeddingManager:
 
         for epoch in range(1, self.train_config['num_epochs'] + 1):
             dataloader.reset()
+            smooth_loss = 0.0
+            steps = 0
             
             while dataloader.has_next():
                 # Get training batch.
@@ -85,13 +87,11 @@ class EmbeddingManager:
                 # torch.nn.utils.clip_grad_norm_(self.embeddings.parameters(), self.train_config['max_grad_norm'])
                 optimizer.step()
                 smooth_loss += train_loss.item() / self.train_config['steps_per_checkpoint']
-
                 steps += 1
-                if steps % self.train_config['steps_per_checkpoint'] == 0:
-                    store_path = f'{self.train_config["log_dir"]}/transe_model_sd_epoch_{epoch}_step_{steps}.ckpt'
-                    print(f'[EMBED] Epoch {epoch:02d} - Training smooth loss: {smooth_loss:.5f} at {store_path}\n\n')
-                    smooth_loss = 0.0
-                    torch.save(self.embeddings.state_dict(), store_path)
+
+            store_path = f'{self.train_config["log_dir"]}/transe_model_sd_epoch_{epoch}.ckpt'
+            print(f'[EMBED] Epoch {epoch:02d} - Training smooth loss: {smooth_loss/steps:.5f} at {store_path}\n\n')
+            torch.save(self.embeddings.state_dict(), store_path)
 
 
 class AuthorEmbedding(KnowledgeEmbedding):

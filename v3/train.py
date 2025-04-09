@@ -14,7 +14,7 @@ def train_epoch(model, dataloader, optimizer, loss_fn, device):
     """Train the model for one epoch"""
     model.train()
     total_loss = 0
-    total_samples = 0
+    total_iterations = 0
     
     for batch in tqdm(dataloader, desc="Training"):
         paths = batch['paths'].to(device)
@@ -35,40 +35,39 @@ def train_epoch(model, dataloader, optimizer, loss_fn, device):
             tgt_tokens.permute(1, 0, 2)   # [seq_len-1, batch, embed_dim]
         )
         
-        # Calculate loss
-        loss = loss_fn(
+        # Calculate per-sample losses without aggregation
+        losses = loss_fn(
             outputs.permute(1, 0, 2),  # [batch, seq_len-1, embed_dim]
             tgt_tokens,                # [batch, seq_len-1, embed_dim]
             labels
         )
         
+        # Compute mean loss for backpropagation
+        loss = losses.mean()
+        
         # Backward pass and optimize
         loss.backward()
         optimizer.step()
         
-        total_loss += loss.item() * batch_size
-        total_samples += batch_size
+        # Track loss per iteration (not multiplied by batch size)
+        total_loss += loss.item()
+        total_iterations += 1
         
-    return total_loss / total_samples
+    return total_loss / total_iterations
 
 def evaluate(model, dataset, device):
     """Evaluate the model on the test dataset"""
     model.eval()
     
-    total = 0
-    positive_count = 0
-    negative_count = 0
-
-    total_pos_count = 0
-    checkpoint_pos_count = 0
-    checkpoint_pos_found = 0
-    
-    iteration = 0
-    steps_per_checkpoint = 10
+    result_dict = {
+        "y_pred_pos": [],
+        "y_pred_neg": [],
+    }
     
     with torch.no_grad():
         for data in tqdm(dataset, desc="Testing"):
             # Get the data
+            edge = data["central_edge"].to(device)
             paths = data['paths'].to(device)
             masks = data['masks'].to(device)
             labels = data['labels'].squeeze(1).to(device)
@@ -79,14 +78,32 @@ def evaluate(model, dataset, device):
                 
             batch_size, seq_len, embed_dim = tokens.shape
             
-            # Calculate metrics
-            total += paths.shape[0]
-            positive_count += labels.sum().item()
-            negative_count += labels.shape[0] - labels.sum().item()
+            # Create input and target sequences for scoring
+            src_tokens = tokens[:, :-1]
+            tgt_tokens = tokens[:, 1:]
             
-            total_pos_count += data['positives_count']
-            checkpoint_pos_count += data['positives_count']
-            checkpoint_pos_found += data['positives_found']
+            # Get model outputs
+            outputs = model(
+                src_tokens.permute(1, 0, 2),
+                tgt_tokens.permute(1, 0, 2)
+            )
+            
+            # Calculate per-sample losses without aggregation
+            losses = loss_fn(
+                outputs.permute(1, 0, 2),
+                tgt_tokens,
+                torch.ones_like(labels),  # Use all-ones to get raw distances
+            )
+            
+            # Compute percentile value of central edge according to losses
+            # Argsort the losses
+            sorted_indices = torch.argsort(losses)
+            
+            # Get the index of the central edge in sorted losses
+            central_pos = edge[sorted_indices].argmax()
+            
+            # Get the percentile of central edge
+            percentile = (central_pos + 1) / sorted_indices.size(0)
             
             iteration += 1
             
@@ -157,7 +174,8 @@ def main():
     ).to(device)
     
     # Initialize loss function and optimizer
-    ntp_loss_fn = NTPLoss(margin=1.0, distance_metric=config['training'].get('similarity_type', 'l2'))
+    # Creating a modified loss function that can return non-aggregated losses
+    loss_fn = NTPLoss(margin=1.0, distance_metric=config['training'].get('similarity_type', 'l2'))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     
     # Load model if evaluating only
@@ -173,7 +191,7 @@ def main():
         print(f"Epoch {epoch+1}/{args.epochs}")
         
         # Train
-        train_loss = train_epoch(model, train_loader, optimizer, ntp_loss_fn, device)
+        train_loss = train_epoch(model, train_loader, optimizer, loss_fn, device)
         print(f"Training loss: {train_loss:.6f}")
         
         # Save model checkpoint

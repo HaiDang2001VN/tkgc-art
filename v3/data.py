@@ -218,10 +218,11 @@ class TemporalDataset(IterableDataset):
                 paths  = torch.empty((0, self.k+1), dtype=torch.int32)
                 masks  = torch.empty((0, self.k+1), dtype=torch.int8)
                 labels = torch.empty((0, 1), dtype=torch.int32)
+                centrals = torch.empty((0, 1), dtype=torch.int32)
                 tokens = torch.empty((0, self.k+1, self.embedding_manager.node_dim))
                 
-                path_list, positives_found, positives_count = self._temporal_bfs(edge[0], timestamp)
-                temp = self._temporal_bfs(edge[1], timestamp)
+                path_list, positives_found, positives_count = self._temporal_bfs(edge[0], timestamp, edge[1])
+                temp = self._temporal_bfs(edge[1], timestamp, edge[0])
                 
                 path_list += temp[0]
                 positives_found += temp[1]
@@ -235,9 +236,11 @@ class TemporalDataset(IterableDataset):
                     masks  = torch.cat((masks, path['mask'].unsqueeze(dim=0)))
                     labels = torch.cat((labels, path['label'].unsqueeze(dim=0)))
                     tokens = torch.cat((tokens, path['tokens'].unsqueeze(dim=0)))
+                    centrals = torch.cat(
+                        (centrals, path['central'].unsqueeze(dim=0)))
                 
                 yield {
-                    'central_edge': edge,
+                    'central_edge': centrals,
                     'paths': paths,
                     'masks': masks,
                     'labels': labels,
@@ -249,7 +252,7 @@ class TemporalDataset(IterableDataset):
             counter = (counter + len(group['edges'])) % num_workers
       
             
-    def _temporal_bfs(self, src, timestamp, current_inclusive: bool = False):
+    def _temporal_bfs(self, src, timestamp, tgt, current_inclusive: bool = False):
         n = self.graph['num_nodes']
         
         dist            = torch.zeros(n, dtype=torch.int32) - 1
@@ -304,6 +307,7 @@ class TemporalDataset(IterableDataset):
         ret = []
         
         for idx, (score, dst) in enumerate(positive_paths + sorted(negative_paths)[:self.m_d - len(positive_paths)]):
+            is_central = (dst == tgt)
             (path, mask) = self._trace_path(dst, prev)
             tokens = self.embedding_manager.get_path_tokens(path, mask)
             
@@ -311,7 +315,8 @@ class TemporalDataset(IterableDataset):
                 'path': path,
                 'mask': mask,
                 'tokens': tokens,
-                'label': torch.tensor([1 if idx < len(positive_paths) else 0], dtype=torch.int8)
+                'label': torch.tensor([1 if idx < len(positive_paths) else 0], dtype=torch.int8),
+                'central': torch.tensor([int(is_central)], dtype=torch.int8)
             })
             
         return ret, len(positive_paths), len(positives)
