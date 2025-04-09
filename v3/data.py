@@ -12,6 +12,7 @@ class TemporalDataset(IterableDataset):
     def __init__(self, config, node_dim: int = 128, k: int = None, m_d: int = None):
         super().__init__()
         
+        self.dataset_name      = config['data']['name']
         self.dataset           = PygLinkPropPredDataset(name=config['data']['name'], root=config['data']['path'])
         self.is_bidirectional  = config['data'].get('directionality', 'bi') == 'bi'
         

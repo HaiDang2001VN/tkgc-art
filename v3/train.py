@@ -9,6 +9,7 @@ import argparse
 from model import TransformerModel
 from dist import NTPLoss
 from data import TemporalDataset
+from ogb.linkproppred import Evaluator
 
 def train_epoch(model, dataloader, optimizer, loss_fn, device):
     """Train the model for one epoch"""
@@ -59,10 +60,9 @@ def evaluate(model, dataset, device):
     """Evaluate the model on the test dataset"""
     model.eval()
     
-    result_dict = {
-        "y_pred_pos": [],
-        "y_pred_neg": [],
-    }
+    y_pred, y_label = [], []
+    evaluator = Evaluator(name=dataset.dataset_name)
+    result_dict = None
     
     with torch.no_grad():
         for data in tqdm(dataset, desc="Testing"):
@@ -93,7 +93,7 @@ def evaluate(model, dataset, device):
                 outputs.permute(1, 0, 2),
                 tgt_tokens,
                 torch.ones_like(labels),  # Use all-ones to get raw distances
-            )
+            ).detach()
             
             # Compute percentile value of central edge according to losses
             # Argsort the losses
@@ -105,17 +105,24 @@ def evaluate(model, dataset, device):
             # Get the percentile of central edge
             percentile = (central_pos + 1) / sorted_indices.size(0)
             
-            iteration += 1
+            y_pred.append(percentile)
+            y_label.append(labels[edge.argmax()])
             
-            if iteration % steps_per_checkpoint == 0:
-                print(f'[Iteration #{iteration}] Total number of samples: {total}, Positive: {positive_count}, Negative: {negative_count}')
-                print(f'Hit rate: {checkpoint_pos_found/max(1, checkpoint_pos_count):.5f} ({checkpoint_pos_found}/{checkpoint_pos_count}), Cumulative hit rate: {positive_count/max(1, total_pos_count):.5f} ({positive_count}/{total_pos_count})\n')
-                checkpoint_pos_count = checkpoint_pos_found = 0
+        # Convert to tensors
+        y_pred = torch.cat(y_pred)
+        y_label = torch.cat(y_label)
+        
+        y_dict = {
+            "y_pred_pos": y_pred[y_label == 1],
+            "y_pred_neg": y_pred[y_label == 0],
+        }
+        
+        result_dict = evaluator.eval(y_dict)
+
+    # print(f'[Final] Total number of samples: {total}, Positive: {positive_count}, Negative: {negative_count}')
+    # print(f'Cumulative hit rate: {positive_count/max(1, total_pos_count):.5f} ({positive_count}/{total_pos_count})\n')
     
-    print(f'[Final] Total number of samples: {total}, Positive: {positive_count}, Negative: {negative_count}')
-    print(f'Cumulative hit rate: {positive_count/max(1, total_pos_count):.5f} ({positive_count}/{total_pos_count})\n')
-    
-    return positive_count / max(1, total_pos_count)
+    return result_dict
 
 def main():
     parser = argparse.ArgumentParser(description='Train and evaluate temporal graph model')
@@ -201,8 +208,11 @@ def main():
         # Evaluate every few epochs or on the last epoch
         if (epoch + 1) % 5 == 0 or epoch == args.epochs - 1:
             print("Evaluating model...")
-            hit_rate = evaluate(model, test_dataset, device)
-            print(f"Hit Rate: {hit_rate:.5f}")
+            result_dict = evaluate(model, test_dataset, device)
+
+            # Log results
+            for metric_name, value in result_dict.items():
+                print(f'val_{metric_name}: {value}')
     
     print("Training completed!")
 
