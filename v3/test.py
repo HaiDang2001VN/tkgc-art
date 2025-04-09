@@ -1,9 +1,9 @@
-from data_2 import TemporalDataset
+from data import TemporalDataset
 from tqdm import tqdm
 import json
 
 # Load configuration from specified path
-with open('v3/config.json') as f:
+with open('config.json') as f:
     config = json.load(f)
     
 dataset = TemporalDataset(config, k=3, m_d=50)

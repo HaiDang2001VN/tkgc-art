@@ -49,11 +49,11 @@
         "wandb_tags": ["temporal", "graph", "transformer"],
         "wandb_log_model": "all",
         "steps_per_checkpoint": 10,
-        "log_dir": "model"
+        "log_dir": "../model"
     },
     "data": {
         "name": "ogbl-collab",
-        "path": "data",
+        "path": "../data",
         "random_seed": 42,
         "timestamp_label": "year",
         "directionality": "bi",
