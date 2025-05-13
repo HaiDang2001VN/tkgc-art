@@ -4,6 +4,7 @@ import argparse
 
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
@@ -69,6 +70,23 @@ class KGEModelProxy(nn.Module):
                 print(f"Error loading state dict: {e}")
 
         self.model.eval()
+
+    def norm(self, tensor: Tensor, dim: int = -1) -> Tensor:
+        """
+        Apply the normalization used by the underlying KGE model:
+        - TransE: normalize embeddings with its configured p_norm.
+        - RotatE: compute vector norm over real & imaginary parts (L2).
+        - Other models: fallback to standard 2-norm.
+        """
+        # TransE: uses F.normalize with p_norm
+        if hasattr(self.model, 'p_norm'):
+            return F.normalize(tensor, p=self.model.p_norm, dim=dim)
+        # RotatE: uses torch.linalg.vector_norm
+        elif self.model_name == 'rotate':
+            return torch.linalg.vector_norm(tensor, dim=dim)
+        # Default: standard L2 norm
+        else:
+            return tensor.norm(p=2, dim=dim)
 
     def forward(self, batched_paths: Tensor) -> Tensor:
         heads = batched_paths[:, -2]
@@ -165,6 +183,7 @@ class KGEModelProxy(nn.Module):
             proxy.model.load_state_dict(best_state)
         embeddings = proxy.model.node_emb.weight.detach().cpu()
         return proxy, embeddings
+
 
 
 def main(config_path: str):
