@@ -8,7 +8,10 @@
 #include <sstream>
 #include <iostream>
 #include <queue>
+#include <map>
 using namespace std;
+
+vector<string> split(string s, const string& delimiter);
 
 struct Row
 {
@@ -31,33 +34,39 @@ int main(int argc, char **argv)
     int num_threads = stoi(argv[4]);
 
     // 1) Load CSV
+    vector<map<string, string>> csv_data;
+    vector<string> col_names;
     vector<Row> rows;
     {
         ifstream in(csv_path);
         string header;
         getline(in, header);
+
+        col_names = split(header, ",");
+
         string line;
         while (getline(in, line))
         {
-            Row r;
-            stringstream ss(line);
-            getline(ss, line, ',');
-            r.edge_id = stoi(line);
-            getline(ss, line, ',');
-            r.u = stoi(line);
-            getline(ss, line, ',');
-            r.v = stoi(line);
-            getline(ss, line, ',');
-            r.u_type = stoi(line);
-            getline(ss, line, ',');
-            r.v_type = stoi(line);
-            getline(ss, line, ',');
-            r.ts = stoi(line);
-            getline(ss, r.split, ',');
-            getline(ss, line, ',');
-            r.label = stoi(line);
-            getline(ss, r.edge_type, '\n');
-            rows.push_back(r);
+            vector<string> row_data = split(line, ",");
+            map<string, string> data_by_col;
+            for (int i = 0; i < col_names.size(); ++i)
+                data_by_col[col_names[i]] = row_data[i];
+            csv_data.push_back(data_by_col);
+        }
+
+        for (map<string, string> row_data: csv_data) {
+            Row row;
+            row.edge_type = row_data["edge_type"];
+            row.split     = row_data["split"];
+            row.edge_id   = stoi(row_data["edge_id"]);
+            row.u         = stoi(row_data["u"]);
+            row.u_type    = stoi(row_data["u_type"]);
+            row.v         = stoi(row_data["v"]);
+            row.v_type    = stoi(row_data["v_type"]);
+            row.ts        = stoi(row_data["ts"]);
+            row.label     = stoi(row_data["label"]);
+
+            rows.push_back(row);
         }
     }
 
@@ -166,6 +175,8 @@ int main(int argc, char **argv)
             // Print: edge_id \t hops \t nodes(id|type,...) \t node_types(...) \t edge_types(...)
             cout << r.edge_id << "\t";
             cout << best.size() - 1 << "\t";
+
+            cout << "."; // Prefix with a dot to make sure there's always input
             for (size_t i = 0; i < best.size(); ++i)
             {
                 if (i)
@@ -173,6 +184,8 @@ int main(int argc, char **argv)
                 cout << best[i].first << "|" << best[i].second;
             }
             cout << "\t";
+
+            cout << "."; // Prefix with a dot to make sure there's always input
             for (size_t i = 0; i < node_types.size(); ++i)
             {
                 if (i)
@@ -180,6 +193,8 @@ int main(int argc, char **argv)
                 cout << node_types[i];
             }
             cout << "\t";
+
+            cout << "."; // Prefix with a dot to make sure there's always input
             for (size_t i = 0; i < edge_types.size(); ++i)
             {
                 if (i)
@@ -192,4 +207,18 @@ int main(int argc, char **argv)
     // flush any remaining edges
     flush_buffer();
     return 0;
+}
+
+vector<string> split(string s, const string& delimiter) {
+    vector<string> tokens;
+    size_t pos = 0;
+    string token;
+    while ((pos = s.find(delimiter)) != string::npos) {
+        token = s.substr(0, pos);
+        tokens.push_back(token);
+        s.erase(0, pos + delimiter.length());
+    }
+    tokens.push_back(s);
+
+    return tokens;
 }
