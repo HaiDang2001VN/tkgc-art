@@ -1,7 +1,13 @@
-// pathfinder.cpp
-#include <bits/stdc++.h>
+// g++ -std=c++23 -O3 -pthread -o prepare prepare.cpp
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <iostream>
+#include <queue>
 using namespace std;
 
 struct Row
