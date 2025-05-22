@@ -1,0 +1,1 @@
+- Setting `weights_only=False` wherever uses `torch.loads` in libraries' codebase

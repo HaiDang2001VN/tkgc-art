@@ -14,7 +14,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from evaluation import evaluate  # assumes eval.py provides evaluate()
 
 # Assumes PathDataModule code is saved in path_datamodule.py
-from path_datamodule import PathDataModule
+from loader import PathDataModule
 
 
 class PositionalEncoding(nn.Module):

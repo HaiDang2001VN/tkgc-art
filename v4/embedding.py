@@ -225,6 +225,9 @@ def main(config_path: str):
     ]
 
     for name, tr, val in partitions:
+        if name == 'train' or name == 'val':
+            continue
+        
         proxy_model, embeddings = KGEModelProxy.train_model(
             train_triples=tr,
             val_triples=val,

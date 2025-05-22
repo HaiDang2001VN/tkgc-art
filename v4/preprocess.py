@@ -53,11 +53,14 @@ class TemporalGraphSearch:
     def _load_model(self):
         # Load embedding configuration JSON
         embed_cfg_path = self.cfg.get('embedding_config')
-        if not os.path.isabs(embed_cfg_path):
-            embed_cfg_path = os.path.join(
-                self.cfg.get('storage_dir', '.'), embed_cfg_path)
+        # if not os.path.isabs(embed_cfg_path):
+        #     embed_cfg_path = os.path.join(
+        #         self.cfg.get('storage_dir', '.'), embed_cfg_path)
         with open(embed_cfg_path) as ef:
             embed_cfg = json.load(ef)
+            
+        # TODO: save current config with runtime dataset parameters            
+            
         # Override with runtime dataset parameters
         embed_cfg['num_nodes'] = self.cfg['num_nodes']
         embed_cfg['num_relations'] = self.cfg.get('num_rels', 1)

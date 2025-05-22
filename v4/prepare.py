@@ -61,12 +61,12 @@ class CsvNeo4jManager:
         # Nodes CSV
         nodes = pd.unique(
             self.pos_df[[':START_ID', ':END_ID']].values.ravel('K'))
-        nodes_csv = os.path.join(out_dir, "nodes.csv")
+        nodes_csv = out_dir + "/nodes.csv" # os.path.join(out_dir, "nodes.csv")
         pd.DataFrame({"node_id:ID": nodes}).to_csv(nodes_csv, index=False)
         print(f"[LOG] Wrote nodes CSV: {nodes_csv}")
 
         # Edges CSV
-        edges_csv = os.path.join(out_dir, "edges.csv")
+        edges_csv = out_dir + "/edges.csv" # os.path.join(out_dir, "edges.csv")
         self.pos_df.to_csv(edges_csv, index=False)
         print(f"[LOG] Wrote edges CSV: {edges_csv}")
 
@@ -172,6 +172,9 @@ if __name__ == '__main__':
         auth=(args.user, args.password),
         max_hops=args.max_hops
     )
+    
+    args.out = os.path.abspath(args.out).replace("\\", "/")
+    
     nodes_csv, edges_csv = mgr.create_csv(args.out)
     mgr.import_csv(nodes_csv, edges_csv)
     mgr.find_paths(args.out)

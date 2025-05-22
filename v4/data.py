@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 # Unified dataset imports
 from ogb.linkproppred import LinkPropPredDataset as OGBDataset
-from tgb.linkproppred import LinkPropPredDataset as TGBDataset
+from tgb.linkproppred.dataset import LinkPropPredDataset as TGBDataset
 
 
 def parse_arguments():
@@ -157,11 +157,13 @@ def process_ogb_dataset(configuration):
                 })
 
             if split in ['valid', 'test']:
+                temporal_values = np.unique(info[temporal_field])
+                
                 for idx, (u_neg, v_neg) in enumerate(
                     tqdm(neg_edges, desc=f"{split} negative edges")
                 ):
                     ts_val = (
-                        info[temporal_field][idx] if temporal_field
+                        np.random.choice(temporal_values) if temporal_field # assign a random timestamp for negative edge
                         else split_code[split]
                     )
                     records.append({

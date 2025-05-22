@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from lightning.pytorch import LightningDataModule
+from typing import Union
 
 # Proxy for extracting shallow embeddings
 from embedding import KGEModelProxy
@@ -24,9 +25,9 @@ class EdgeDataset(Dataset):
         df: pd.DataFrame,
         pos_paths: dict,
         neg_paths: dict,
-        features_map: dict | None,
-        kge_proxy: KGEModelProxy | None,
-        num_neg: int | None = None
+        features_map: Union[dict, None],
+        kge_proxy: Union[KGEModelProxy, None],
+        num_neg: Union[int, None] = None
     ):
         self.df = df
         self.edge_ids = df.index.tolist()
@@ -115,7 +116,7 @@ class PathDataModule(LightningDataModule):
     def prepare_data(self):
         pass
 
-    def setup(self, stage: str | None = None):
+    def setup(self, stage: Union[str, None] = None):
         edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
         df = pd.read_csv(edges_fp, index_col='edge_id')
         self.dfs = {s: df[df['split'] == s].copy()
