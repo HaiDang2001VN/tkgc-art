@@ -20,18 +20,17 @@ def run_thread(args):
         line = line.strip()
         if not line:
             continue
-        parts = line.split("\t")
+        parts = line.split(";")
         
         print(parts)
         
         # parts: [edge_id, hops, nodes, node_types, edge_types]
         eid = parts[0]
         hops = int(parts[1])
-        # parse nodes as list of (id,type)
+        # parse nodes as list of ids separated by comma
         nodes = []
-        for nt in parts[2][1:].split(","):
-            nid, nty = nt.split("|")
-            nodes.append((int(nid), int(nty)))
+        if parts[2][1:]:
+            nodes = [int(x) for x in parts[2][1:].split(",")]
         # parse node_types as list of ints
         node_types = [int(x) for x in parts[3][1:].split(",")] if parts[3][1:] else []
         # parse edge_types as list of strings

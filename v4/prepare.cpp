@@ -33,6 +33,10 @@ int main(int argc, char **argv)
     int thread_id = stoi(argv[3]);
     int num_threads = stoi(argv[4]);
 
+    cout << "Processing thread " << thread_id << " of " << num_threads << "\n";
+    cout << "Max hops: " << max_hops << "\n";
+    cout << "CSV path: " << csv_path << "\n";
+
     // 1) Load CSV
     vector<map<string, string>> csv_data;
     vector<string> col_names;
@@ -69,6 +73,12 @@ int main(int argc, char **argv)
             rows.push_back(row);
         }
     }
+
+    cout << "Loaded " << rows.size() << " rows\n";
+    cout << "Columns: ";
+    for (const auto &col : col_names)
+        cout << col << " ";
+    cout << "\n";
 
     // 2) Sort by ts asc, label desc
     sort(rows.begin(), rows.end(), [](auto &a, auto &b)
@@ -173,28 +183,28 @@ int main(int argc, char **argv)
             }
 
             // Print: edge_id \t hops \t nodes(id|type,...) \t node_types(...) \t edge_types(...)
-            cout << r.edge_id << "\t";
-            cout << best.size() - 1 << "\t";
+            cout << r.edge_id << ";";
+            cout << best.size() - 1 << ";";
 
-            cout << "."; // Prefix with a dot to make sure there's always input
+            // cout << "."; // Prefix with a dot to make sure there's always input
             for (size_t i = 0; i < best.size(); ++i)
             {
                 if (i)
                     cout << ",";
-                cout << best[i].first << "|" << best[i].second;
+                cout << best[i].first;// << "|" << best[i].second;
             }
-            cout << "\t";
+            cout << ";";
 
-            cout << "."; // Prefix with a dot to make sure there's always input
+            // cout << "."; // Prefix with a dot to make sure there's always input
             for (size_t i = 0; i < node_types.size(); ++i)
             {
                 if (i)
                     cout << ",";
                 cout << node_types[i];
             }
-            cout << "\t";
+            cout << ";";
 
-            cout << "."; // Prefix with a dot to make sure there's always input
+            // cout << "."; // Prefix with a dot to make sure there's always input
             for (size_t i = 0; i < edge_types.size(); ++i)
             {
                 if (i)
