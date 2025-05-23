@@ -1,6 +1,7 @@
 import os
 import subprocess
 import argparse
+from tqdm import tqdm
 from multiprocessing import Pool
 
 
@@ -22,7 +23,7 @@ def run_thread(args):
             continue
         parts = line.split(";")
         
-        print(parts)
+        # print(parts)
         
         # parts: [edge_id, hops, nodes, node_types, edge_types]
         eid = parts[0]
