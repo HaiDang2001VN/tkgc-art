@@ -16,26 +16,22 @@ def run_thread(args):
 
     results = {}
     for line in proc.stdout:
-        print(line)
-        
         line = line.strip()
         if not line:
             continue
         parts = line.split(";")
-        
-        # print(parts)
         
         # parts: [edge_id, hops, nodes, node_types, edge_types]
         eid = parts[0]
         hops = int(parts[1])
         # parse nodes as list of ids separated by comma
         nodes = []
-        if parts[2][1:]:
-            nodes = [int(x) for x in parts[2][1:].split(",")]
+        if parts[2]:
+            nodes = [int(x) for x in parts[2].split(",")]
         # parse node_types as list of ints
-        node_types = [int(x) for x in parts[3][1:].split(",")] if parts[3][1:] else []
+        node_types = [int(x) for x in parts[3].split(",")] if parts[3] else []
         # parse edge_types as list of strings
-        edge_types = parts[4][1:].split(",") if parts[4][1:] else []
+        edge_types = parts[4].split(",") if parts[4] else []
 
         results[eid] = {
             "hops": hops,

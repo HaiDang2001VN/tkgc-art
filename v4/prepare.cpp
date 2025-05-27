@@ -29,13 +29,15 @@ int main(int argc, char **argv)
         return 1;
     }
     string csv_path = argv[1];
-    int max_hops = stoi(argv[2]);
-    int thread_id = stoi(argv[3]);
+    int max_hops    = stoi(argv[2]);
+    int thread_id   = stoi(argv[3]);
     int num_threads = stoi(argv[4]);
 
-    cout << "Processing thread " << thread_id << " of " << num_threads << "\n";
-    cout << "Max hops: " << max_hops << "\n";
-    cout << "CSV path: " << csv_path << "\n";
+    ofstream log_stream("./logs.txt", ios_base::app);
+
+    log_stream << "Processing thread " << thread_id << " of " << num_threads << endl;
+    log_stream << "Max hops: " << max_hops << endl;
+    log_stream << "CSV path: " << csv_path << endl;
 
     // 1) Load CSV
     vector<map<string, string>> csv_data;
@@ -57,28 +59,40 @@ int main(int argc, char **argv)
                 data_by_col[col_names[i]] = row_data[i];
             csv_data.push_back(data_by_col);
         }
-
+        
         for (map<string, string> row_data: csv_data) {
-            Row row;
-            row.edge_type = row_data["edge_type"];
-            row.split     = row_data["split"];
-            row.edge_id   = stoi(row_data["edge_id"]);
-            row.u         = stoi(row_data["u"]);
-            row.u_type    = stoi(row_data["u_type"]);
-            row.v         = stoi(row_data["v"]);
-            row.v_type    = stoi(row_data["v_type"]);
-            row.ts        = stoi(row_data["ts"]);
-            row.label     = stoi(row_data["label"]);
+            try {
+                Row row;
+                row.edge_type = row_data["edge_type"];
+                row.split     = row_data["split"];
+                row.edge_id   = stoi(row_data["edge_id"]);
+                row.u         = stoi(row_data["u"]);
+                row.u_type    = stoi(row_data["u_type"]);
+                row.v         = stoi(row_data["v"]);
+                row.v_type    = stoi(row_data["v_type"]);
+                row.ts        = stoi(row_data["ts"]);
+                row.label     = stoi(row_data["label"]);
+    
+                rows.push_back(row);
+            }
+            catch (exception ex) {
+                ofstream log_stream("./logs.txt", ios_base::app);
+                
+                for (auto pair: row_data)
+                    log_stream << '(' << pair.first << ',' << pair.second << ')' << ' ';
 
-            rows.push_back(row);
+                log_stream << '\n' << ex.what() << '\n';
+
+                throw;
+            }
         }
     }
 
-    cout << "Loaded " << rows.size() << " rows\n";
-    cout << "Columns: ";
+    log_stream << "Loaded " << rows.size() << " rows\n";
+    log_stream << "Columns: ";
     for (const auto &col : col_names)
-        cout << col << " ";
-    cout << "\n";
+        log_stream << col << " ";
+    log_stream << "\n";
 
     // 2) Sort by ts asc, label desc
     sort(rows.begin(), rows.end(), [](auto &a, auto &b)
@@ -211,7 +225,7 @@ int main(int argc, char **argv)
                     cout << ",";
                 cout << edge_types[i];
             }
-            cout << "\n";
+            cout << endl;
         }
     }
     // flush any remaining edges
