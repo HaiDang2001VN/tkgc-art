@@ -1,5 +1,5 @@
 {
-  "dataset": "ogbl-collab",
+  "dataset": "ogbl-ppa",
   "storage_dir": "../data/",
   "embedding_config": "./embedding_config.json",
   "train_ratio": 0.3,

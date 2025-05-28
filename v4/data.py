@@ -63,7 +63,7 @@ def process_ogb_dataset(configuration):
         num_edges = (
             len(train_info.get('head', []))
             if ogb_dataset.is_hetero
-            else train_info['edge'].size(0)
+            else train_info['edge'].shape[0]
         )
         pre_indices = set(
             random.sample(range(num_edges), int(train_ratio * num_edges))
@@ -157,7 +157,8 @@ def process_ogb_dataset(configuration):
                 })
 
             if split in ['valid', 'test']:
-                temporal_values = np.unique(info[temporal_field])
+                temporal_values = np.unique(
+                    info[temporal_field]) if temporal_field else split_code[split]
                 
                 for idx, (u_neg, v_neg) in enumerate(
                     tqdm(neg_edges, desc=f"{split} negative edges")
