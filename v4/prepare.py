@@ -4,6 +4,7 @@ import argparse
 from tqdm import tqdm
 from multiprocessing import Pool
 
+from utils import load_configuration
 
 def run_thread(args):
     """
@@ -45,26 +46,29 @@ def run_thread(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Parallel pathfinder manager")
-    parser.add_argument('--csv',        required=True,
-                        help="Path to edges CSV")
+    parser.add_argument('--config',        required=True,
+                        help="Path to config.json file")
     parser.add_argument('--binary',     required=True,
                         help="Compiled C++ worker binary")
-    parser.add_argument('--max_hops',   type=int,
-                        default=5,  help="Max hop limit")
-    parser.add_argument('--num_threads', type=int, default=4,
-                        help="Number of worker threads")
-    parser.add_argument(
-        '--out',        default='./neo4j_import', help="Output directory")
+    parser.add_argument('--sampling', type=int, default=4,
+                        help="Number of actual threads to run (sampling)")
     args = parser.parse_args()
+    
+    config = load_configuration(args.config)
+    data_dir = config.get('storage_dir', '.')
+    num_threads = config.get('num_threads', 1)
+    csv_path = os.path.join(data_dir, f"{config['dataset']}_edges.csv")
+    max_hops = config.get('max_hops', 4)
 
     # Prepare per-thread invocation args
+    run_threads = min(num_threads, args.sampling)
     tasks = [
-        (args.binary, args.csv, args.max_hops, tid, args.num_threads)
-        for tid in range(args.num_threads)
+        (args.binary, csv_path, max_hops, tid, num_threads)
+        for tid in range(run_threads)
     ]
 
     # Run in parallel
-    with Pool(args.num_threads) as pool:
+    with Pool(run_threads) as pool:
         thread_maps = pool.map(run_thread, tasks)
 
     # Collate all results
@@ -73,8 +77,8 @@ def main():
         final_map.update(tm)
 
     # Write to paths.json
-    os.makedirs(args.out, exist_ok=True)
-    out_file = os.path.join(args.out, 'paths.json')
+    # os.makedirs(args.out, exist_ok=True)
+    out_file = os.path.join(data_dir, f"{config['dataset']}_paths.json")
     with open(out_file, 'w') as f:
         import json
         json.dump(final_map, f, indent=2)

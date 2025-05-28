@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-
 import argparse
-import json
 import os
 import random
 
@@ -14,6 +12,8 @@ from tqdm import tqdm
 from ogb.linkproppred import LinkPropPredDataset as OGBDataset
 from tgb.linkproppred.dataset import LinkPropPredDataset as TGBDataset
 
+from utils import load_configuration
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -24,12 +24,6 @@ def parse_arguments():
         help="Path to the config JSON file"
     )
     return parser.parse_args()
-
-
-def load_configuration(config_path):
-    with open(config_path) as file:
-        return json.load(file)
-
 
 def process_ogb_dataset(configuration):
     ogb_dataset = OGBDataset(

@@ -1,0 +1,10 @@
+Processing thread 1 of 1000
+Max hops: 5
+CSV path: ../data/ogbl-collab_edges.csv
+Loaded 1485465 rows
+Columns: edge_id feat_pos_u feat_pos_v u v u_type v_type ts split label edge_type 
+Processing thread 0 of 1000
+Max hops: 5
+CSV path: ../data/ogbl-collab_edges.csv
+Loaded 1485465 rows
+Columns: edge_id feat_pos_u feat_pos_v u v u_type v_type ts split label edge_type 

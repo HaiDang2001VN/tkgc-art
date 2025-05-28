@@ -10,6 +10,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.nn.kge import DistMult, ComplEx, RotatE, TransE
 
+from utils import load_configuration
 
 class KGEModelProxy(nn.Module):
     MODEL_MAP = {
@@ -188,8 +189,7 @@ class KGEModelProxy(nn.Module):
 
 def main(config_path: str):
     # Load main config and embedding config
-    with open(config_path) as f:
-        main_cfg = json.load(f)
+    main_cfg = load_configuration(config_path)
     embed_cfg_path = main_cfg.get('embedding_config')
     if not embed_cfg_path:
         raise KeyError("'embedding_config' missing in main config.")
@@ -225,8 +225,8 @@ def main(config_path: str):
     ]
 
     for name, tr, val in partitions:
-        if name == 'train' or name == 'val':
-            continue
+        # if name == 'train' or name == 'val':
+        #     continue
         
         proxy_model, embeddings = KGEModelProxy.train_model(
             train_triples=tr,
