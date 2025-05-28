@@ -169,6 +169,7 @@ def process_ogb_dataset(configuration):
                         'label': 0, 'edge_type': 0
                     })
 
+    print(f"Total edges: {len(records)}")
     return pd.DataFrame(records), feature_map
 
 
@@ -221,16 +222,20 @@ def process_tgb_dataset(configuration):
                         'label': 0, 'edge_type': int(edge_type_val)
                     })
 
+    print(f"Total edges: {len(records)}")
     return pd.DataFrame(records)
 
 
 def save_edges_csv(dataframe, configuration):
+    print(f"Saving edges CSV for dataset: {configuration['dataset']}")
     dataframe.sort_values(['ts', 'label'], ascending=[
                           True, False], inplace=True)
+    print(f"Total edges to save: {len(dataframe)}")
     dataframe.reset_index(drop=True, inplace=True)
     output_dir = configuration.get('storage_dir', '.')
     os.makedirs(output_dir, exist_ok=True)
     path = os.path.join(output_dir, f"{configuration['dataset']}_edges.csv")
+    print(f"Saving edges to: {path}")
     dataframe.to_csv(path, index=True, index_label="edge_id")
     print(f"Saved edges CSV to: {path}")
 
@@ -238,7 +243,9 @@ def save_edges_csv(dataframe, configuration):
 def save_feature_map(feature_map, configuration):
     output_dir = configuration.get('storage_dir', '.')
     os.makedirs(output_dir, exist_ok=True)
+    print(f"Saving node features for dataset: {configuration['dataset']}")
     path = os.path.join(output_dir, f"{configuration['dataset']}_features.pt")
+    print(f"Total node features: {len(feature_map)}")
     torch.save(feature_map, path)
     print(f"Saved node features to: {path}")
 
