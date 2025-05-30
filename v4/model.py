@@ -88,24 +88,36 @@ class PathPredictor(LightningModule):
         all_emb = []
         meta_info = []
         for sample in batch:
+            if sample is None:
+                continue
+
             paths = sample['paths']
             num_paths = len(paths)
             max_len = max(p.size(0) for p in paths) if num_paths else 0
-            meta_info.append((num_paths, max_len - 1))
-            for idx in range(num_paths):
-                emb = sample['shallow_emb'][idx]
-                if sample.get('features') is not None:
-                    feat = sample['features'][idx]
-                    emb = torch.cat([emb, feat], dim=-1)
-                all_emb.append(emb)
+            
+            if 'shallow_emb' in sample:
+                meta_info.append((num_paths, max_len - 1))
+                for idx in range(num_paths):
+                    emb = sample['shallow_emb'][idx]
+                    if sample.get('features') is not None:
+                        feat = sample['features'][idx]
+                        emb = torch.cat([emb, feat], dim=-1)
+                    all_emb.append(emb)
+                
+        if len(all_emb) == 0:
+            return [], [], meta_info
+
         src_seq = [e[:-1] for e in all_emb]
         tgt_seq = [e[1:] for e in all_emb]
-        src_emb = pad_sequence(src_seq, batch_first=True, padding_value=0.0)
-        tgt_emb = pad_sequence(tgt_seq, batch_first=True, padding_value=0.0)
+        src_emb = torch.tensor(pad_sequence(src_seq, batch_first=True, padding_value=0.0))
+        tgt_emb = torch.tensor(pad_sequence(tgt_seq, batch_first=True, padding_value=0.0))
         return src_emb, tgt_emb, meta_info
 
     def _predict(self, batch: list[dict]):
         src_emb, tgt_emb, meta = self._prepare_batch(batch)
+        if len(meta) == 0:
+            return None, None
+        
         pred_emb = self(src_emb)
         diff = self.norm_fn(pred_emb - tgt_emb, dim=-1)
         return diff, meta
@@ -116,6 +128,10 @@ class PathPredictor(LightningModule):
 
     def training_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
+        
+        if meta is None:
+            return None
+        
         losses, ptr = [], 0
         for num_paths, length in meta:
             slice_diff = diff[ptr:ptr + num_paths, :length]
@@ -128,11 +144,17 @@ class PathPredictor(LightningModule):
             losses.append(z.mean())
             ptr += num_paths
         loss = -torch.stack(losses).mean()
-        self.log('train_loss', loss, prog_bar=True)
+        
+        self.log('train_loss', loss, on_step=True, prog_bar=True)
+        
         return loss
 
     def validation_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
+        
+        if meta is None:
+            return None, None
+        
         ptr = 0
         for num_paths, length in meta:
             slice_diff = diff[ptr:ptr + num_paths, :length]
@@ -148,10 +170,12 @@ class PathPredictor(LightningModule):
             self.neg_scores.extend(neg_z.flatten().tolist())
             ptr += num_paths
         loss = -torch.tensor(self.pos_scores).mean()
-        self.log('val_loss', loss, prog_bar=True)
+        
+        self.log('val_loss', loss, on_step=True, prog_bar=True)
+        
         return loss, torch.tensor(self.pos_scores)
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         # perform full evaluation using external evaluate()
         dataset_name = self.trainer.datamodule.dataset
         results = evaluate(dataset_name, torch.tensor(

@@ -43,7 +43,11 @@ class EdgeDataset(Dataset):
     def __getitem__(self, idx):
         eid = self.edge_ids[idx]
         label = self.df.at[eid, 'label']
-        pos = self.pos_paths.get(str(eid), {}).get('nodes', [])
+        pos = self.pos_paths.get(str(eid), {}).get('nodes')
+        
+        if pos is None:
+            return None
+        
         raw_negs = self.neg_paths.get(str(eid), [])
         if self.num_neg is not None and len(raw_negs) > self.num_neg:
             raw_negs = random.sample(raw_negs, self.num_neg)
@@ -60,7 +64,8 @@ class EdgeDataset(Dataset):
             feats = []
             fmap = self.features_map
             for path in all_paths:
-                feats.append(torch.stack([fmap[0][n] for n in path], dim=0))
+                ft = torch.stack([torch.tensor(fmap[0][n]) for n in path], dim=0)
+                feats.append(ft)
             item['features'] = torch.stack(feats, dim=0)
         if self.kge_proxy is not None:
             embs = []
@@ -130,7 +135,7 @@ class PathDataModule(LightningDataModule):
                           for s in ('train', 'val', 'test')}
         feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
         if os.path.exists(feat_fp):
-            fm = torch.load(feat_fp)
+            fm = torch.load(feat_fp, weights_only=False)
             if isinstance(fm, dict):
                 first = next(iter(fm.values()))
                 fmap = fm
