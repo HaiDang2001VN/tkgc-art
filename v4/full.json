@@ -10,5 +10,6 @@
   "dim_feedforward": 128,
   "nhead": 4,
   "num_layers": 3,
-  "dropout": 0.1
+  "dropout": 0.1,
+  "store": "model"
 }

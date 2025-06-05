@@ -16,8 +16,8 @@ vector<string> split(string s, const string& delimiter);
 struct Row
 {
     int edge_id, ts, label;
-    string u, v; // u_type and v_type removed
-    string edge_type, split;
+    int u, v, edge_type; // Changed to int
+    string split;
 };
 
 // using Node = pair<string, string>; // (node_id_string, node_type_string) // REMOVED
@@ -44,7 +44,7 @@ int main(int argc, char **argv)
     // vector<map<string, string>> csv_data; // Removed
     vector<string> col_names;
     vector<Row> rows;
-    unordered_map<string, string> node_id_to_type_map;   // Moved here: Map from node_id to node_type
+    unordered_map<int, int> node_id_to_type_map;   // Map from node_id to node_type
     {
         ifstream in(csv_path);
         string header;
@@ -62,21 +62,19 @@ int main(int argc, char **argv)
 
             try {
                 Row row;
-                row.edge_type = row_map_data["edge_type"];
+                row.edge_type = stoi(row_map_data["edge_type"]); // Changed to stoi
                 row.split     = row_map_data["split"];
                 row.edge_id   = stoi(row_map_data["edge_id"]);
-                row.u         = row_map_data["u"];
-                // row.u_type    = row_map_data["u_type"]; // Removed
-                row.v         = row_map_data["v"];
-                // row.v_type    = row_map_data["v_type"]; // Removed
+                row.u         = stoi(row_map_data["u"]); // Changed to stoi
+                row.v         = stoi(row_map_data["v"]); // Changed to stoi
                 row.ts        = stoi(row_map_data["ts"]);
                 row.label     = stoi(row_map_data["label"]);
     
                 rows.push_back(row);
 
                 // Populate node type map during CSV loading
-                node_id_to_type_map[row.u] = row_map_data["u_type"]; // Use row_map_data directly
-                node_id_to_type_map[row.v] = row_map_data["v_type"]; // Use row_map_data directly
+                node_id_to_type_map[row.u] = stoi(row_map_data["u_type"]); // Use row_map_data directly
+                node_id_to_type_map[row.v] = stoi(row_map_data["v_type"]); // Use row_map_data directly
 
             }
             catch (exception ex) {
@@ -105,7 +103,7 @@ int main(int argc, char **argv)
         return a.label > b.label; });
 
     // 3) Incremental graph storage
-    unordered_map<string, vector<pair<string, string>>> adj; // Key: node_id, Value: vector of (neighbor_id, edge_type)
+    unordered_map<int, vector<pair<int, int>>> adj; // Key: node_id, Value: vector of (neighbor_id, edge_type) // Changed to int
     // unordered_map<string, string> node_id_to_type_map;   // Map from node_id to node_type // MOVED
     int cur_ts = rows.empty() ? 0 : rows.back().ts; // Initialize cur_ts to the last timestamp
     vector<Row> buffer;
@@ -143,21 +141,21 @@ int main(int argc, char **argv)
         if (do_query)
         {
             // BFS with depth‐limit = max_hops
-            string src_id = r.u;
-            string dst_id = r.v;
+            int src_id = r.u; // Changed to int
+            int dst_id = r.v; // Changed to int
 
-            queue<string> q; // Queue stores node IDs
-            unordered_map<string, string> parent_map; // Key: child_id, Value: parent_id
-            unordered_map<string, int> node_depths;   // Key: node_id, Value: depth
+            queue<int> q; // Queue stores node IDs // Changed to int
+            unordered_map<int, int> parent_map; // Key: child_id, Value: parent_id // Changed to int
+            unordered_map<int, int> node_depths;   // Key: node_id, Value: depth // Changed to int
             
             q.push(src_id);
             node_depths[src_id] = 0; 
-            vector<string> best; // Stores path as a vector of node IDs
+            vector<int> best; // Stores path as a vector of node IDs // Changed to int
             // bool path_to_dst_found_bfs = false; // Removed
 
             while (!q.empty())
             {
-                string cur_node_id = q.front();
+                int cur_node_id = q.front(); // Changed to int
                 q.pop();
 
                 int cur_depth = node_depths[cur_node_id];
@@ -171,7 +169,7 @@ int main(int argc, char **argv)
                 if (adj.count(cur_node_id)) {
                     for (auto &pr : adj.at(cur_node_id)) // pr is pair<string, string> (neighbor_id, edge_type)
                     {
-                        string neighbor_node_id = pr.first;
+                        int neighbor_node_id = pr.first; // Changed to int
                         if (!node_depths.count(neighbor_node_id)) 
                         {
                             parent_map[neighbor_node_id] = cur_node_id; 
@@ -179,7 +177,7 @@ int main(int argc, char **argv)
 
                             if (neighbor_node_id == dst_id) 
                             {
-                                string temp_node_id = dst_id;
+                                int temp_node_id = dst_id; // Changed to int
                                 while (temp_node_id != src_id) 
                                 {
                                     best.push_back(temp_node_id);
@@ -204,11 +202,12 @@ int main(int argc, char **argv)
             if (!best.empty()) // best is vector<string> (node IDs)
             {
                 // Collect meta-paths
-                vector<string> edge_types, node_types_in_path;
+                vector<int> edge_types; // Changed to int
+                vector<int> node_types_in_path; // Changed to int
                 for (size_t i = 0; i + 1 < best.size(); ++i)
                 {
-                    string current_path_node_id = best[i]; 
-                    string next_path_node_id = best[i + 1];
+                    int current_path_node_id = best[i]; // Changed to int
+                    int next_path_node_id = best[i + 1]; // Changed to int
                     if (adj.count(current_path_node_id)) {
                         for (auto &pr : adj.at(current_path_node_id)) // pr is (neighbor_id, edge_type)
                         {
@@ -220,14 +219,15 @@ int main(int argc, char **argv)
                         }
                     }
                 }
-                for (const string& node_id_in_path : best)
+                for (const int& node_id_in_path : best) // Changed to int
                 {
                     // Ensure node_id_to_type_map has the type, otherwise handle (e.g., "UNKNOWN")
                     if (node_id_to_type_map.count(node_id_in_path)) {
                         node_types_in_path.push_back(node_id_to_type_map.at(node_id_in_path));
                     } else {
-                        node_types_in_path.push_back("UNKNOWN_TYPE"); // Fallback
+                        node_types_in_path.push_back(0); // Fallback
                     }
+                    // node_types_in_path.push_back(0); // Dummy value
                 }
 
                 // Print: edge_id ; hops ; node_ids ; node_types ; edge_types

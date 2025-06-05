@@ -25,6 +25,25 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+
+def save_edges(configuration, u_map, v_map, u_type_map, v_type_map, edge_type_map):
+    """Saves the mapping dictionaries to disk."""
+    output_dir = configuration.get('storage_dir', '.')
+    dataset_name = configuration['dataset']
+    os.makedirs(output_dir, exist_ok=True)
+
+    torch.save(u_map, os.path.join(output_dir, f"{dataset_name}_u_map.pt"))
+    torch.save(v_map, os.path.join(output_dir, f"{dataset_name}_v_map.pt"))
+    torch.save(u_type_map, os.path.join(
+        output_dir, f"{dataset_name}_u_type_map.pt"))
+    torch.save(v_type_map, os.path.join(
+        output_dir, f"{dataset_name}_v_type_map.pt"))
+    torch.save(edge_type_map, os.path.join(
+        output_dir, f"{dataset_name}_edge_type_map.pt"))
+
+    print("Saved mapping dictionaries.")
+
+
 def process_ogb_dataset(configuration):
     ogb_dataset = OGBDataset(
         name=configuration['dataset'],
@@ -66,6 +85,10 @@ def process_ogb_dataset(configuration):
     split_code = {'pre': 0, 'train': 1, 'valid': 2, 'test': 3}
     records = []
 
+    # Create mapping dictionaries
+    u_map, v_map, u_type_map, v_type_map, edge_type_map = {}, {}, {}, {}, {}
+    u_id, v_id, u_type_id, v_type_id, edge_type_id = 0, 0, 0, 0, 0
+
     for split in ['train', 'valid', 'test']:
         info = splits.get(split)
         if info is None:
@@ -92,6 +115,26 @@ def process_ogb_dataset(configuration):
                     desc=f"Processing {split} edges"
                 )
             ):
+                # Assign integer IDs
+                u_str = f"{u_type}_{u}"
+                v_str = f"{v_type}_{v}"
+
+                if u_str not in u_map:
+                    u_map[u_str] = u_id
+                    u_id += 1
+                if v_str not in v_map:
+                    v_map[v_str] = v_id
+                    v_id += 1
+                if u_type not in u_type_map:
+                    u_type_map[u_type] = u_type_id
+                    u_type_id += 1
+                if v_type not in v_type_map:
+                    v_type_map[v_type] = v_type_id
+                    v_type_id += 1
+                if edge_type_val not in edge_type_map:
+                    edge_type_map[edge_type_val] = edge_type_id
+                    edge_type_id += 1
+
                 if temporal_field:
                     split_label = (
                         'pre' if split == 'train' and ts_val < threshold
@@ -106,21 +149,31 @@ def process_ogb_dataset(configuration):
 
                 records.append({
                     'feat_pos_u': u, 'feat_pos_v': v,
-                    'u': f"{u_type}_{u}", 'v': f"{v_type}_{v}",
-                    'u_type': u_type, 'v_type': v_type,
+                    'u': u_map[u_str], 'v': v_map[v_str],
+                    'u_type': u_type_map[u_type], 'v_type': v_type_map[v_type],
                     'ts': ts_val, 'split': split_label,
-                    'label': 1, 'edge_type': edge_type_val
+                    'label': 1, 'edge_type': edge_type_map[edge_type_val]
                 })
 
                 if idx < len(neg_pairs):
                     u_neg, v_neg = neg_pairs[idx]
+                    u_neg_str = f"{u_type}_{u_neg}"
+                    v_neg_str = f"{v_type}_{v_neg}"
+
+                    if u_neg_str not in u_map:
+                        u_map[u_neg_str] = u_id
+                        u_id += 1
+                    if v_neg_str not in v_map:
+                        v_map[v_neg_str] = v_id
+                        v_id += 1
+
                     neg_ts = ts_val if temporal_field else split_code[split]
                     records.append({
                         'feat_pos_u': u_neg, 'feat_pos_v': v_neg,
-                        'u': f"{u_type}_{u_neg}", 'v': f"{v_type}_{v_neg}",
-                        'u_type': u_type, 'v_type': v_type,
+                        'u': u_map[u_neg_str], 'v': v_map[v_neg_str],
+                        'u_type': u_type_map[u_type], 'v_type': v_type_map[v_type],
                         'ts': neg_ts, 'split': split,
-                        'label': 0, 'edge_type': edge_type_val
+                        'label': 0, 'edge_type': edge_type_map[edge_type_val]
                     })
         else:
             edges = info['edge'].tolist()
@@ -129,6 +182,13 @@ def process_ogb_dataset(configuration):
             for idx, (u, v) in enumerate(
                 tqdm(edges, desc=f"{split} positive edges")
             ):
+                if u not in u_map:
+                    u_map[u] = u_id
+                    u_id += 1
+                if v not in v_map:
+                    v_map[v] = v_id
+                    v_id += 1
+
                 if temporal_field:
                     split_label = (
                         'pre' if split == 'train' and info[temporal_field][idx] < threshold
@@ -144,7 +204,7 @@ def process_ogb_dataset(configuration):
 
                 records.append({
                     'feat_pos_u': u, 'feat_pos_v': v,
-                    'u': u, 'v': v,
+                    'u': u_map[u], 'v': v_map[v],
                     'u_type': 0, 'v_type': 0,
                     'ts': ts_val, 'split': split_label,
                     'label': 1, 'edge_type': 0
@@ -153,23 +213,33 @@ def process_ogb_dataset(configuration):
             if split in ['valid', 'test']:
                 temporal_values = np.unique(
                     info[temporal_field]) if temporal_field else split_code[split]
-                
+
                 for idx, (u_neg, v_neg) in enumerate(
                     tqdm(neg_edges, desc=f"{split} negative edges")
                 ):
+                    if u_neg not in u_map:
+                        u_map[u_neg] = u_id
+                        u_id += 1
+                    if v_neg not in v_map:
+                        v_map[v_neg] = v_id
+                        v_id += 1
                     ts_val = (
-                        np.random.choice(temporal_values) if temporal_field # assign a random timestamp for negative edge
+                        np.random.choice(temporal_values) if temporal_field  # assign a random timestamp for negative edge
                         else split_code[split]
                     )
                     records.append({
                         'feat_pos_u': u_neg, 'feat_pos_v': v_neg,
-                        'u': u_neg, 'v': v_neg,
+                        'u': u_map[u_neg], 'v': v_map[v_neg],
                         'u_type': 0, 'v_type': 0,
                         'ts': ts_val, 'split': split,
                         'label': 0, 'edge_type': 0
                     })
 
     print(f"Total edges: {len(records)}")
+
+    # Save mapping dictionaries
+    save_edges(configuration, u_map, v_map, u_type_map, v_type_map, edge_type_map)
+
     return pd.DataFrame(records), feature_map
 
 
@@ -190,6 +260,11 @@ def process_tgb_dataset(configuration):
         train_ratio * len(all_ts))] if len(all_ts) else 0
 
     records = []
+
+    # Create mapping dictionaries
+    u_map, v_map, u_type_map, v_type_map, edge_type_map = {}, {}, {}, {}, {}
+    u_id, v_id, u_type_id, v_type_id, edge_type_id = 0, 0, 0, 0, 0
+
     for split, mask in [('train', tgb_dataset.train_mask), ('valid', tgb_dataset.val_mask), ('test', tgb_dataset.test_mask)]:
         idxs = np.where(mask)[0]
         u_nodes, v_nodes, ts_vals, edge_types = (
@@ -199,13 +274,30 @@ def process_tgb_dataset(configuration):
         )
 
         for u, v, ts_val, edge_type_val in zip(u_nodes, v_nodes, ts_vals, edge_types):
+            # Assign integer IDs
+            if u not in u_map:
+                u_map[u] = u_id
+                u_id += 1
+            if v not in v_map:
+                v_map[v] = v_id
+                v_id += 1
+            if node_types[int(u)] not in u_type_map:
+                u_type_map[node_types[int(u)]] = u_type_id
+                u_type_id += 1
+            if node_types[int(v)] not in v_type_map:
+                v_type_map[node_types[int(v)]] = v_type_id
+                v_type_id += 1
+            if edge_type_val not in edge_type_map:
+                edge_type_map[edge_type_val] = edge_type_id
+                edge_type_id += 1
+
             split_label = 'pre' if split == 'train' and ts_val < threshold_ts else split
             records.append({
                 'feat_pos_u': int(u), 'feat_pos_v': int(v),
-                'u': int(u), 'v': int(v),
-                'u_type': int(node_types[int(u)]), 'v_type': int(node_types[int(v)]),
+                'u': u_map[u], 'v': v_map[v],
+                'u_type': u_type_map[node_types[int(u)]], 'v_type': v_type_map[node_types[int(v)]],
                 'ts': int(ts_val), 'split': split_label,
-                'label': 1, 'edge_type': int(edge_type_val)
+                'label': 1, 'edge_type': edge_type_map[edge_type_val]
             })
 
         if split in ('valid', 'test'):
@@ -213,16 +305,37 @@ def process_tgb_dataset(configuration):
                 u_nodes, v_nodes, ts_vals, edge_type=edge_types, split_mode=split
             )
             for u, ts_val, edge_type_val, neg_vs in zip(u_nodes, ts_vals, edge_types, neg_lists):
+                # Ensure negative samples are in the mapping
+                if u not in u_map:
+                    u_map[u] = u_id
+                    u_id += 1
+                for nv in neg_vs:
+                    if nv not in v_map:
+                        v_map[nv] = v_id
+                        v_id += 1
+                    if node_types[int(u)] not in u_type_map:
+                        u_type_map[node_types[int(u)]] = u_type_id
+                        u_type_id += 1
+                    if node_types[int(nv)] not in v_type_map:
+                        v_type_map[node_types[int(nv)]] = v_type_id
+                        v_type_id += 1
+                    if edge_type_val not in edge_type_map:
+                        edge_type_map[edge_type_val] = edge_type_id
+                        edge_type_id += 1
                 for nv in neg_vs:
                     records.append({
                         'feat_pos_u': int(u), 'feat_pos_v': int(nv),
-                        'u': int(u), 'v': int(nv),
-                        'u_type': int(node_types[int(u)]), 'v_type': int(node_types[int(nv)]),
+                        'u': u_map[u], 'v': v_map[nv],
+                        'u_type': u_type_map[node_types[int(u)]], 'v_type': v_type_map[node_types[int(nv)]],
                         'ts': int(ts_val), 'split': split,
-                        'label': 0, 'edge_type': int(edge_type_val)
+                        'label': 0, 'edge_type': edge_type_map[edge_type_val]
                     })
 
     print(f"Total edges: {len(records)}")
+
+    # Save mapping dictionaries
+    save_edges(configuration, u_map, v_map, u_type_map, v_type_map, edge_type_map)
+
     return pd.DataFrame(records)
 
 

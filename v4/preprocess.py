@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Union, Tuple
 import torch
 import pandas as pd
 from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 from bisect import bisect_left
 
 # Import the new proxy
@@ -19,6 +19,7 @@ class TemporalGraphSearch:
         with open(config_path) as f:
             self.cfg = json.load(f)
         self.partition = partition
+        self.num_threads = self.cfg.get('num_threads', 1)
 
         # Read edges CSV (edge_id as index)
         csv_path = os.path.join(
@@ -42,8 +43,10 @@ class TemporalGraphSearch:
 
         # Load shortest-path constraints keyed by edge_id
         self.shortest_paths: Dict[int, Dict] = {}
-        paths_file = os.path.join(self.cfg.get(
-            'storage_dir', '.'), 'paths.json')
+        paths_file = os.path.join(
+            self.cfg.get('storage_dir', '.'),
+            f"{self.cfg['dataset']}_paths.json"  # Correct path construction
+        )
         if os.path.exists(paths_file):
             with open(paths_file) as pf:
                 mapping = json.load(pf)
@@ -107,7 +110,7 @@ class TemporalGraphSearch:
         """Construct adjacency and final_graph from graph_df"""
         for _, row in tqdm(self.graph_df.iterrows(), total=len(self.graph_df), desc="Building graph"):
             u, v = int(row['u']), int(row['v'])
-            etype, ts = row['edge_type'], int(row['ts'])
+            etype, ts = int(row['edge_type']), int(row['ts'])  # Ensure edge_type is int
             self.adj_list[u].append((v, etype, ts))
         for u, neighs in tqdm(self.adj_list.items(), desc="Sorting adjacency"):
             neighs.sort(key=lambda x: x[2])
@@ -120,6 +123,9 @@ class TemporalGraphSearch:
         results: Dict[str, List[List[Union[int, str]]]] = {}
         empty_count = 0
         total = len(self.query_df)
+        
+        print(f"[LOG] Starting beam search with {self.num_threads} threads and beam width {beam_width}")
+        print(f"[LOG] Total edges to search: {total}")
         # (eid,u,v,ts,max_depth)
         to_search: List[Tuple[int, int, int, int, int]] = []
         for eid, row in tqdm(self.query_df.iterrows(), total=total, desc="Preparing targets"):
@@ -135,7 +141,7 @@ class TemporalGraphSearch:
                     to_search.append((eid, u, v, ts, max_depth))
 
         # Perform beam search only on valid targets
-        with Pool(cpu_count()) as pool:
+        with Pool(self.num_threads) as pool:
             for eid, paths in tqdm(
                 pool.imap_unordered(self._process_edge, to_search),
                 total=len(to_search),

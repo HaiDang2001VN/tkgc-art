@@ -64,9 +64,16 @@ class KGEModelProxy(nn.Module):
         # Load pretrained weights if provided
         if state_dict_path:
             try:
-                state_dict = torch.load(state_dict_path, map_location='cpu')
-                self.model.load_state_dict(state_dict)
-                print(f"Loaded model state from {state_dict_path}")
+                if state_dict_path.endswith('_embeddings.pt'):
+                    # Load embeddings directly into node_emb
+                    embeddings = torch.load(state_dict_path, map_location='cpu')
+                    self.model.node_emb.weight = nn.Parameter(embeddings)
+                    print(f"Loaded embeddings from {state_dict_path}")
+                else:
+                    # Load model state dict
+                    state_dict = torch.load(state_dict_path, map_location='cpu')
+                    self.model.load_state_dict(state_dict)
+                    print(f"Loaded model state from {state_dict_path}")
             except Exception as e:
                 print(f"Error loading state dict: {e}")
 
