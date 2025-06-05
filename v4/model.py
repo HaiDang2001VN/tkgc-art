@@ -52,6 +52,7 @@ class PathPredictor(LightningModule):
         dim_feedforward: int = 512,
         dropout: float = 0.1,
         lp_norm: int = 2,
+        max_hops: int = 10, # Added max_hops
         norm_fn=None
     ):
         super().__init__()
@@ -63,7 +64,7 @@ class PathPredictor(LightningModule):
         self.input_proj = nn.Linear(
             self.hparams.emb_dim, self.hparams.hidden_dim)
         self.pos_encoder = PositionalEncoding(
-            self.hparams.hidden_dim, dropout, batch_first=True)
+            self.hparams.hidden_dim, dropout, max_len=max_hops + 1, batch_first=True) # Use max_hops + 1
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.hparams.hidden_dim,
             nhead=nhead,
@@ -218,6 +219,7 @@ if __name__ == '__main__':
         dim_feedforward=cfg.get('dim_feedforward', 512),
         dropout=cfg.get('dropout', 0.1),
         lp_norm=lp,
+        max_hops=cfg.get('max_hops', 10), # Pass max_hops
         norm_fn=norm_fn
     )
 
