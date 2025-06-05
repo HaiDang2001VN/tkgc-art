@@ -196,6 +196,13 @@ def main(config_path: str):
     with open(embed_cfg_path) as f:
         embed_cfg = json.load(f)
 
+    # Ensure hidden_channels is in embed_cfg, KGEModelProxy will use it from there
+    if 'hidden_channels' not in embed_cfg:
+        # Default or raise error if critical and not provided
+        # For now, let's assume KGEModelProxy's default is acceptable or it's always provided
+        print(f"Warning: 'hidden_channels' not explicitly set in {embed_cfg_path}, KGEModel will use its default or fail if required.")
+
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Read CSV edges
@@ -224,6 +231,8 @@ def main(config_path: str):
         ('test', torch.cat([pre, train, valid], dim=0), test),
     ]
 
+    model_name_from_embed_cfg = embed_cfg.get('model_name', 'model') # Get model name for saving config
+
     for name, tr, val in partitions:
         # if name == 'train' or name == 'val':
         #     continue
@@ -231,14 +240,17 @@ def main(config_path: str):
         proxy_model, embeddings = KGEModelProxy.train_model(
             train_triples=tr,
             val_triples=val,
-            cfg=embed_cfg,
+            cfg=embed_cfg, # embed_cfg is passed here, KGEModelProxy uses hidden_channels from it
             device=device,
             name_suffix=name
         )
         store = main_cfg.get('store', 'embedding')
         suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
-        model_name = embed_cfg.get('model_name', 'model')
-        out_name = f"{model_name}_{main_cfg['dataset']}_{name}{suffix}"
+        
+        out_prefix = f"{model_name_from_embed_cfg}_{main_cfg['dataset']}_{name}"
+        
+        # Save model or embeddings
+        out_name = f"{out_prefix}{suffix}"
         out_path = os.path.join(main_cfg['storage_dir'], out_name)
         if store == 'embedding':
             torch.save(embeddings, out_path)
@@ -246,6 +258,16 @@ def main(config_path: str):
         else:
             torch.save(proxy_model.model.state_dict(), out_path)
             print(f"Saved {name} model state to {out_path}")
+
+        # Add model_name to embed_cfg before saving
+        embed_cfg['model_name'] = model_name_from_embed_cfg
+
+        # Save the modified embed_cfg
+        config_out_name = f"{out_prefix}_config.json"
+        config_out_path = os.path.join(main_cfg['storage_dir'], config_out_name)
+        with open(config_out_path, 'w') as f_config_out:
+            json.dump(embed_cfg, f_config_out, indent=4)
+        print(f"Saved {name} embedding config to {config_out_path}")
 
 
 if __name__ == '__main__':

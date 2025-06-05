@@ -51,27 +51,53 @@ class TemporalGraphSearch:
                 self.shortest_paths[int(eid_str)] = path
 
     def _load_model(self):
-        # Load embedding configuration JSON
-        embed_cfg_path = self.cfg.get('embedding_config')
-        # if not os.path.isabs(embed_cfg_path):
-        #     embed_cfg_path = os.path.join(
-        #         self.cfg.get('storage_dir', '.'), embed_cfg_path)
-        with open(embed_cfg_path) as ef:
+        # Get the path to the original embedding config to find the model_name used for saving files
+        original_embed_cfg_path = self.cfg.get('embedding_config')
+        if not original_embed_cfg_path:
+            raise KeyError("'embedding_config' missing in main config (self.cfg).")
+        
+        try:
+            with open(original_embed_cfg_path) as ef_orig:
+                original_embed_cfg_content = json.load(ef_orig)
+        except FileNotFoundError:
+            storage_dir_for_orig_cfg = self.cfg.get('storage_dir', '.')
+            resolved_original_embed_cfg_path = os.path.join(storage_dir_for_orig_cfg, os.path.basename(original_embed_cfg_path))
+            try:
+                with open(resolved_original_embed_cfg_path) as ef_orig:
+                    original_embed_cfg_content = json.load(ef_orig)
+            except FileNotFoundError:
+                raise FileNotFoundError(
+                    f"Original embedding config not found at {original_embed_cfg_path} or {resolved_original_embed_cfg_path}"
+                )
+
+        model_name_from_original_cfg = original_embed_cfg_content.get('model_name', 'model')
+
+        out_prefix = f"{model_name_from_original_cfg}_{self.cfg['dataset']}_{self.partition}"
+        base_storage_dir = self.cfg.get('storage_dir', '.')
+
+        derived_embed_cfg_filename = f"{out_prefix}_config.json"
+        derived_embed_cfg_path = os.path.join(base_storage_dir, derived_embed_cfg_filename)
+
+        if not os.path.exists(derived_embed_cfg_path):
+            raise FileNotFoundError(
+                f"Derived embedding config file not found: {derived_embed_cfg_path}. "
+                "Ensure embedding.py ran successfully for this partition and saved its config."
+            )
+
+        with open(derived_embed_cfg_path) as ef:
             embed_cfg = json.load(ef)
             
-        # TODO: save current config with runtime dataset parameters            
-            
-        # Override with runtime dataset parameters
-        embed_cfg['num_nodes'] = self.cfg['num_nodes']
-        embed_cfg['num_relations'] = self.cfg.get('num_rels', 1)
-        embed_cfg['hidden_channels'] = self.cfg['hidden_dim']
-        # Determine state dict path
-        model_name = f"transe_{self.cfg['dataset']}_{self.partition}"
-        base = self.cfg.get('storage_dir', '.')
-        fname = f"{model_name}_model.pt" if self.cfg.get(
-            'store') == 'model' else f"{model_name}_embeddings.pt"
-        state_path = os.path.join(base, fname)
-        # Instantiate proxy
+        store_type = self.cfg.get('store', 'embedding')
+        model_suffix = '_embeddings.pt' if store_type == 'embedding' else '_model.pt'
+        state_dict_filename = f"{out_prefix}{model_suffix}"
+        state_path = os.path.join(base_storage_dir, state_dict_filename)
+
+        if not os.path.exists(state_path):
+            raise FileNotFoundError(
+                f"Model state/embedding file not found: {state_path}. "
+                "Ensure embedding.py ran successfully and saved the model/embeddings."
+            )
+
         self.model = KGEModelProxy(
             cfg=embed_cfg,
             state_dict_path=state_path

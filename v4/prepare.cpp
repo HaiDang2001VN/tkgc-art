@@ -15,11 +15,12 @@ vector<string> split(string s, const string& delimiter);
 
 struct Row
 {
-    int edge_id, u, u_type, v, v_type, ts, label;
+    int edge_id, ts, label;
+    string u, v; // u_type and v_type removed
     string edge_type, split;
 };
 
-using Node = pair<int, int>; // (node_id, node_type)
+// using Node = pair<string, string>; // (node_id_string, node_type_string) // REMOVED
 
 int main(int argc, char **argv)
 {
@@ -40,9 +41,10 @@ int main(int argc, char **argv)
     log_stream << "CSV path: " << csv_path << endl;
 
     // 1) Load CSV
-    vector<map<string, string>> csv_data;
+    // vector<map<string, string>> csv_data; // Removed
     vector<string> col_names;
     vector<Row> rows;
+    unordered_map<string, string> node_id_to_type_map;   // Moved here: Map from node_id to node_type
     {
         ifstream in(csv_path);
         string header;
@@ -53,32 +55,34 @@ int main(int argc, char **argv)
         string line;
         while (getline(in, line))
         {
-            vector<string> row_data = split(line, ",");
-            map<string, string> data_by_col;
+            vector<string> row_data_vec = split(line, ",");
+            unordered_map<string, string> row_map_data; // Changed to unordered_map
             for (int i = 0; i < col_names.size(); ++i)
-                data_by_col[col_names[i]] = row_data[i];
-            csv_data.push_back(data_by_col);
-        }
-        
-        for (map<string, string> row_data: csv_data) {
+                row_map_data[col_names[i]] = row_data_vec[i];
+
             try {
                 Row row;
-                row.edge_type = row_data["edge_type"];
-                row.split     = row_data["split"];
-                row.edge_id   = stoi(row_data["edge_id"]);
-                row.u         = stoi(row_data["u"]);
-                row.u_type    = stoi(row_data["u_type"]);
-                row.v         = stoi(row_data["v"]);
-                row.v_type    = stoi(row_data["v_type"]);
-                row.ts        = stoi(row_data["ts"]);
-                row.label     = stoi(row_data["label"]);
+                row.edge_type = row_map_data["edge_type"];
+                row.split     = row_map_data["split"];
+                row.edge_id   = stoi(row_map_data["edge_id"]);
+                row.u         = row_map_data["u"];
+                // row.u_type    = row_map_data["u_type"]; // Removed
+                row.v         = row_map_data["v"];
+                // row.v_type    = row_map_data["v_type"]; // Removed
+                row.ts        = stoi(row_map_data["ts"]);
+                row.label     = stoi(row_map_data["label"]);
     
                 rows.push_back(row);
+
+                // Populate node type map during CSV loading
+                node_id_to_type_map[row.u] = row_map_data["u_type"]; // Use row_map_data directly
+                node_id_to_type_map[row.v] = row_map_data["v_type"]; // Use row_map_data directly
+
             }
             catch (exception ex) {
                 ofstream log_stream("./logs.txt", ios_base::app);
                 
-                for (auto pair: row_data)
+                for (auto pair: row_map_data)
                     log_stream << '(' << pair.first << ',' << pair.second << ')' << ' ';
 
                 log_stream << '\n' << ex.what() << '\n';
@@ -94,33 +98,40 @@ int main(int argc, char **argv)
         log_stream << col << " ";
     log_stream << "\n";
 
-    // 2) Sort by ts asc, label desc
+    // 2) Sort by ts desc, label desc
     sort(rows.begin(), rows.end(), [](auto &a, auto &b)
          {
-        if (a.ts != b.ts) return a.ts < b.ts;
+        if (a.ts != b.ts) return a.ts > b.ts; // Sort in descending order of ts
         return a.label > b.label; });
 
     // 3) Incremental graph storage
-    unordered_map<int, vector<pair<Node, string>>> adj;
-    int cur_ts = rows.empty() ? 0 : rows[0].ts;
+    unordered_map<string, vector<pair<string, string>>> adj; // Key: node_id, Value: vector of (neighbor_id, edge_type)
+    // unordered_map<string, string> node_id_to_type_map;   // Map from node_id to node_type // MOVED
+    int cur_ts = rows.empty() ? 0 : rows.back().ts; // Initialize cur_ts to the last timestamp
     vector<Row> buffer;
 
     auto flush_buffer = [&]()
     {
-        for (auto &r : buffer)
+        for (auto &buf_r : buffer)
         {
-            if (r.label != 1)
+            if (buf_r.label != 1)
                 continue; // only positive
-            Node n1 = {r.u, r.u_type}, n2 = {r.v, r.v_type};
-            adj[r.u].emplace_back(n2, r.edge_type);
-            adj[r.v].emplace_back(n1, r.edge_type);
+            
+            // Populate node type map - REMOVED FROM HERE
+            // node_id_to_type_map[buf_r.u] = buf_r.u_type;
+            // node_id_to_type_map[buf_r.v] = buf_r.v_type;
+
+            // Add edges to adjacency list (neighbor_id, edge_type)
+            adj[buf_r.u].emplace_back(buf_r.v, buf_r.edge_type); 
+            adj[buf_r.v].emplace_back(buf_r.u, buf_r.edge_type); 
         }
         buffer.clear();
     };
 
     // 4) Process rows, and for query‐edges run BFS
-    for (auto &r : rows)
+    while (!rows.empty())
     {
+        Row& r = rows.back(); // Get the last row
         if (r.ts != cur_ts)
         {
             flush_buffer();
@@ -129,104 +140,126 @@ int main(int argc, char **argv)
         buffer.push_back(r);
 
         bool do_query = (r.split != "pre") && (r.edge_id % num_threads == thread_id);
-        if (!do_query)
-            continue;
-
-        // BFS with depth‐limit = max_hops
-        Node src = {r.u, r.u_type}, dst = {r.v, r.v_type};
-        queue<vector<Node>> q;
-        unordered_set<long long> seen;
-        auto key = [&](const Node &n)
+        if (do_query)
         {
-            return (long long)n.first << 32 | (unsigned long long)n.second;
-        };
-        q.push({src});
-        seen.insert(key(src));
-        vector<Node> best;
+            // BFS with depth‐limit = max_hops
+            string src_id = r.u;
+            string dst_id = r.v;
 
-        while (!q.empty())
-        {
-            auto path = q.front();
-            q.pop();
-            int depth = (int)path.size() - 1;
-            if (depth > max_hops)
-                continue;
-            Node cur = path.back();
-            if (cur == dst)
+            queue<string> q; // Queue stores node IDs
+            unordered_map<string, string> parent_map; // Key: child_id, Value: parent_id
+            unordered_map<string, int> node_depths;   // Key: node_id, Value: depth
+            
+            q.push(src_id);
+            node_depths[src_id] = 0; 
+            vector<string> best; // Stores path as a vector of node IDs
+            // bool path_to_dst_found_bfs = false; // Removed
+
+            while (!q.empty())
             {
-                best = path;
-                break;
-            }
-            if (depth == max_hops)
-                continue; // do not expand further
-            for (auto &pr : adj[cur.first])
-            {
-                Node nb = pr.first;
-                long long k = key(nb);
-                if (!seen.count(k))
+                string cur_node_id = q.front();
+                q.pop();
+
+                int cur_depth = node_depths[cur_node_id];
+
+                if (cur_depth >= max_hops) 
                 {
-                    seen.insert(k);
-                    auto np = path;
-                    np.push_back(nb);
-                    q.push(move(np));
+                    continue;
                 }
-            }
-        }
 
-        // Only print when a path is found
-        if (!best.empty())
-        {
-            // Collect meta-paths
-            vector<string> edge_types, node_types;
-            for (size_t i = 0; i + 1 < best.size(); ++i)
-            {
-                int u_id = best[i].first;
-                Node nxt = best[i + 1];
-                for (auto &pr : adj[u_id])
-                {
-                    if (pr.first == nxt)
+                // Check if cur_node_id exists in adj before iterating
+                if (adj.count(cur_node_id)) {
+                    for (auto &pr : adj.at(cur_node_id)) // pr is pair<string, string> (neighbor_id, edge_type)
                     {
-                        edge_types.push_back(pr.second);
-                        break;
+                        string neighbor_node_id = pr.first;
+                        if (!node_depths.count(neighbor_node_id)) 
+                        {
+                            parent_map[neighbor_node_id] = cur_node_id; 
+                            node_depths[neighbor_node_id] = cur_depth + 1;
+
+                            if (neighbor_node_id == dst_id) 
+                            {
+                                string temp_node_id = dst_id;
+                                while (temp_node_id != src_id) 
+                                {
+                                    best.push_back(temp_node_id);
+                                    temp_node_id = parent_map.at(temp_node_id); 
+                                }
+                                best.push_back(src_id);
+                                reverse(best.begin(), best.end());
+                                // path_to_dst_found_bfs = true; // Removed
+                                break; 
+                            }
+                            q.push(neighbor_node_id); 
+                        }
                     }
                 }
-            }
-            for (auto &n : best)
-            {
-                node_types.push_back(to_string(n.second));
+                if (!best.empty()) // If path was found
+                {
+                    break; 
+                }
             }
 
-            // Print: edge_id \t hops \t nodes(id|type,...) \t node_types(...) \t edge_types(...)
-            cout << r.edge_id << ";";
-            cout << best.size() - 1 << ";";
-
-            // cout << "."; // Prefix with a dot to make sure there's always input
-            for (size_t i = 0; i < best.size(); ++i)
+            // Only print when a path is found
+            if (!best.empty()) // best is vector<string> (node IDs)
             {
-                if (i)
-                    cout << ",";
-                cout << best[i].first;// << "|" << best[i].second;
-            }
-            cout << ";";
+                // Collect meta-paths
+                vector<string> edge_types, node_types_in_path;
+                for (size_t i = 0; i + 1 < best.size(); ++i)
+                {
+                    string current_path_node_id = best[i]; 
+                    string next_path_node_id = best[i + 1];
+                    if (adj.count(current_path_node_id)) {
+                        for (auto &pr : adj.at(current_path_node_id)) // pr is (neighbor_id, edge_type)
+                        {
+                            if (pr.first == next_path_node_id)
+                            {
+                                edge_types.push_back(pr.second);
+                                break;
+                            }
+                        }
+                    }
+                }
+                for (const string& node_id_in_path : best)
+                {
+                    // Ensure node_id_to_type_map has the type, otherwise handle (e.g., "UNKNOWN")
+                    if (node_id_to_type_map.count(node_id_in_path)) {
+                        node_types_in_path.push_back(node_id_to_type_map.at(node_id_in_path));
+                    } else {
+                        node_types_in_path.push_back("UNKNOWN_TYPE"); // Fallback
+                    }
+                }
 
-            // cout << "."; // Prefix with a dot to make sure there's always input
-            for (size_t i = 0; i < node_types.size(); ++i)
-            {
-                if (i)
-                    cout << ",";
-                cout << node_types[i];
-            }
-            cout << ";";
+                // Print: edge_id ; hops ; node_ids ; node_types ; edge_types
+                cout << r.edge_id << ";";
+                cout << best.size() - 1 << ";";
 
-            // cout << "."; // Prefix with a dot to make sure there's always input
-            for (size_t i = 0; i < edge_types.size(); ++i)
-            {
-                if (i)
-                    cout << ",";
-                cout << edge_types[i];
+                for (size_t i = 0; i < best.size(); ++i)
+                {
+                    if (i)
+                        cout << ",";
+                    cout << best[i]; // best[i] is the string ID
+                }
+                cout << ";";
+
+                for (size_t i = 0; i < node_types_in_path.size(); ++i)
+                {
+                    if (i)
+                        cout << ",";
+                    cout << node_types_in_path[i]; 
+                }
+                cout << ";";
+
+                for (size_t i = 0; i < edge_types.size(); ++i)
+                {
+                    if (i)
+                        cout << ",";
+                    cout << edge_types[i];
+                }
+                cout << endl;
             }
-            cout << endl;
         }
+        rows.pop_back(); // Remove the processed row
     }
     // flush any remaining edges
     flush_buffer();
