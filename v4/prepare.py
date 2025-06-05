@@ -50,7 +50,7 @@ def main():
                         help="Path to config.json file")
     parser.add_argument('--binary',     required=True,
                         help="Compiled C++ worker binary")
-    parser.add_argument('--sampling', type=int, default=4,
+    parser.add_argument('--sampling', type=int, default=None,
                         help="Number of actual threads to run (sampling)")
     args = parser.parse_args()
     
@@ -61,7 +61,7 @@ def main():
     max_hops = config.get('max_hops', 4)
 
     # Prepare per-thread invocation args
-    run_threads = min(num_threads, args.sampling)
+    run_threads = min(num_threads, args.sampling) if args.sampling is not None else num_threads
     tasks = [
         (args.binary, csv_path, max_hops, tid, num_threads)
         for tid in range(run_threads)
