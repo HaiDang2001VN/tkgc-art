@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Union, Tuple
 import torch
 import pandas as pd
 from tqdm import tqdm
-from multiprocessing import Pool
+from multiprocessing import Pool, set_start_method # Import set_start_method
 from bisect import bisect_left
 
 # Import the new proxy
@@ -252,6 +252,17 @@ class TemporalGraphSearch:
 
 
 if __name__ == '__main__':
+    # Set the start method to 'spawn' for CUDA compatibility with multiprocessing
+    # This should be done before any CUDA tensors or Pool objects are created.
+    try:
+        set_start_method('spawn', force=True) 
+    except RuntimeError:
+        # This might happen if the start method has already been set and force=False (default)
+        # or if called at an inappropriate time. With force=True, it should generally work
+        # unless there's a more fundamental issue with the environment.
+        print("[Warning] Could not set multiprocessing start method to 'spawn'. This might lead to CUDA issues.")
+        pass
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--partition', required=True,
                         choices=['train', 'val', 'test'])
@@ -262,7 +273,10 @@ if __name__ == '__main__':
     results = tgs.beam_search()
     out_file = os.path.join(
         tgs.cfg.get('storage_dir', '.'),
-        f"transe_{tgs.cfg['dataset']}_{tgs.partition}_neg.json"
+        # Ensure the output filename reflects the actual model used if it's configurable
+        # For now, assuming KGEModelProxy's internal model_name or a config value would be better.
+        # Using a generic name or one derived from config for now.
+        f"{tgs.models[0].model_name if tgs.models else 'kge'}_{tgs.cfg['dataset']}_{tgs.partition}_neg.json"
     )
     with open(out_file, 'w') as f:
         json.dump(results, f, indent=2)
