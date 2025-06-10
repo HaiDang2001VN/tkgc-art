@@ -104,8 +104,8 @@ class KGEModelProxy(nn.Module):
             return tensor.norm(p=2, dim=dim)
 
     def forward(self, batched_paths: Tensor) -> Tensor:
-        heads = batched_paths[:, -2]
-        rels = batched_paths[:, -1]
+        heads = batched_paths[:, -1]
+        rels = batched_paths[:, -2]
         tails = batched_paths[:, 0]
         return self.model(heads, rels, tails)
 
