@@ -20,6 +20,7 @@ class TemporalGraphSearch:
             self.cfg = json.load(f)
         self.partition = partition
         self.num_threads = self.cfg.get('num_threads', 1)
+        print(f"[LOG] Using {self.num_threads} threads/processes for processing.") # Clarified threads/processes
 
         # Read edges CSV (edge_id as index)
         csv_path = os.path.join(
@@ -32,8 +33,9 @@ class TemporalGraphSearch:
         self.graph_df = self.df[self.df['label'] == 1]
         self.query_df = self.df[self.df['split'] != 'pre']
 
-        # Initialize KGEModelProxy using embedding config
-        self._load_model()
+        # Initialize KGEModelProxy instances using embedding config
+        self.models: List[KGEModelProxy] = [] # Initialize models attribute
+        self._load_models() # Renamed from _load_model to _load_models
 
         # Build adjacency list and neighbor set
         self.adj_list: Dict[int, List[Tuple[int,
@@ -53,7 +55,7 @@ class TemporalGraphSearch:
             for eid_str, path in mapping.items():
                 self.shortest_paths[int(eid_str)] = path
 
-    def _load_model(self):
+    def _load_models(self): # Renamed and modified
         # Get the path to the original embedding config to find the model_name used for saving files
         original_embed_cfg_path = self.cfg.get('embedding_config')
         if not original_embed_cfg_path:
@@ -88,7 +90,7 @@ class TemporalGraphSearch:
             )
 
         with open(derived_embed_cfg_path) as ef:
-            embed_cfg = json.load(ef)
+            embed_cfg = json.load(ef) # This is the config for the KGE model
             
         store_type = self.cfg.get('store', 'embedding')
         model_suffix = '_embeddings.pt' if store_type == 'embedding' else '_model.pt'
@@ -101,10 +103,21 @@ class TemporalGraphSearch:
                 "Ensure embedding.py ran successfully and saved the model/embeddings."
             )
 
-        self.model = KGEModelProxy(
-            cfg=embed_cfg,
-            state_dict_path=state_path
-        )
+        # Create num_threads instances of KGEModelProxy
+        print(f"[LOG] Loading {self.num_threads} KGEModelProxy instances...")
+        for i in range(self.num_threads):
+            # Each proxy will load the model and move it to its device.
+            # If on CUDA, care must be taken if processes fork after CUDA init in parent.
+            # However, KGEModelProxy initializes its device internally.
+            proxy_instance = KGEModelProxy(
+                cfg=embed_cfg, # embed_cfg is shared (read-only dict)
+                state_dict_path=state_path # state_path is shared (read-only string)
+            )
+            self.models.append(proxy_instance)
+            print(f"[LOG] Loaded KGEModelProxy instance {i+1}/{self.num_threads} on device {proxy_instance.device}")
+        
+        if not self.models:
+            raise RuntimeError("Failed to load any KGEModelProxy instances.")
 
     def _build_graph(self):
         """Construct adjacency and final_graph from graph_df"""
@@ -124,7 +137,7 @@ class TemporalGraphSearch:
         empty_count = 0
         total = len(self.query_df)
         
-        print(f"[LOG] Starting beam search with {self.num_threads} threads and beam width {beam_width}")
+        print(f"[LOG] Starting beam search with {self.num_threads} processes and beam width {beam_width}")
         print(f"[LOG] Total edges to search: {total}")
         # (eid,u,v,ts,max_depth)
         to_search: List[Tuple[int, int, int, int, int]] = []
@@ -138,9 +151,13 @@ class TemporalGraphSearch:
                     empty_count += 1
                 else:
                     u, v, ts = int(row['u']), int(row['v']), int(row['ts'])
+                    # Pass a model index to _process_edge, or let _process_edge pick one
+                    # For simplicity with multiprocessing.Pool, _process_edge will use one from its copied self.models
                     to_search.append((eid, u, v, ts, max_depth))
 
         # Perform beam search only on valid targets
+        # Each process in the Pool will get a copy of the TemporalGraphSearch instance.
+        # This copy includes the self.models list (which itself contains copies of the KGEModelProxy objects).
         with Pool(self.num_threads) as pool:
             for eid, paths in tqdm(
                 pool.imap_unordered(self._process_edge, to_search),
@@ -166,6 +183,23 @@ class TemporalGraphSearch:
         eid, u, v, ts, max_depth = args
         beam_width = self.cfg.get('num_neg', 20)
         source = u
+        
+        # Each process uses one of its KGEModelProxy instances.
+        # For simplicity, using the first one from its copied list.
+        # This ensures model isolation between processes.
+        # If KGEModelProxy is large, this means N copies of N models are made,
+        # but each process only uses one of its N copies.
+        # A more memory-efficient way for process pools is to initialize
+        # the model within the worker process using an initializer.
+        # However, adhering to "create num_threads kge proxy model" in init:
+        if not self.models: # Should not happen if _load_models was successful
+            raise RuntimeError("No models available in _process_edge. This indicates an issue with object state in the worker process.")
+        
+        # Pick a model for this process. If models are identical, [0] is fine.
+        # To be slightly more robust if self.models could be shorter than self.num_threads in some edge case (though not intended):
+        model_idx = os.getpid() % len(self.models) # Simple way to pick a model, somewhat distributing
+        kge_model_instance = self.models[model_idx]
+
         current: List[List[Union[int, str]]] = [[u]]
         for depth in range(max_depth):
             next_paths: List[List[Union[int, str]]] = []
@@ -174,19 +208,43 @@ class TemporalGraphSearch:
                 edges = self.adj_list.get(last, [])
                 idx = bisect_left(edges, ts, key=lambda x: x[2])
                 for neigh, etype, _ in edges[:idx]:
-                    if depth > 0 and neigh in self.final_graph[source]:
+                    if depth > 0 and neigh in self.final_graph.get(source, set()): # Ensure source key exists
                         continue
                     next_paths.append(path + [etype, neigh])
             if not next_paths:
                 break
             num = len(next_paths)
-            score_tensor = torch.zeros(num)
+            score_tensor = torch.zeros(num) # Stays on CPU
+            
+            # Batched inference
+            # Ensure tensors sent to KGE model are on the KGE model's device
+            model_device = kge_model_instance.device 
             for i in range(0, num, beam_width):
-                batch = torch.tensor(
-                    next_paths[i:i+beam_width], dtype=torch.long)
+                # Batch construction should be integers for torch.tensor
+                batch_paths_list = next_paths[i:i+beam_width]
+                
+                # Convert to tensor; KGEModelProxy expects (heads, rels, tails)
+                # Here, path is [node, rel, node, rel, ..., node]
+                # The KGEModelProxy.forward expects (batched_paths[:, -2], batched_paths[:, -1], batched_paths[:, 0])
+                # This seems to imply paths are [tail, rel, head] for a single triple.
+                # Current path structure: [u, etype1, node1, etype2, node2, ...]
+                # For KGE scoring, we usually score (h, r, t) triples.
+                # The current `next_paths` are full paths. The KGEModelProxy.forward is:
+                # heads = batched_paths[:, -2]  (second to last element, should be relation)
+                # rels = batched_paths[:, -1]   (last element, should be tail if path is [head, rel, tail])
+                # tails = batched_paths[:, 0]   (first element, should be head)
+                # This is unusual. Standard KGE models take (h,r,t).
+                # Let's assume KGEModelProxy.forward(path_tensor) expects path_tensor where each row is a path
+                # and it internally extracts h,r,t based on its specific logic.
+                # The current batch is List[List[Union[int,str]]]. It needs to be List[List[int]].
+                # Assuming all elements in next_paths are already integers as per type hints and previous logic.
+                
+                batch_tensor = torch.tensor(batch_paths_list, dtype=torch.long).to(model_device)
+
                 with torch.no_grad():
-                    sc = self.model(batch)
-                score_tensor[i:i+len(batch)] = sc
+                    sc = kge_model_instance(batch_tensor) # Use the selected kge_model_instance
+                score_tensor[i:i+len(batch_tensor)] = sc.cpu() # Move scores to CPU for topk
+            
             k = min(beam_width, num)
             indices = torch.topk(score_tensor, k).indices.tolist()
             current = [next_paths[i] for i in indices]

@@ -61,19 +61,26 @@ class KGEModelProxy(nn.Module):
             **model_args
         )
 
+        # Determine device and move model
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.to(self.device)
+        print(f"KGEModelProxy initialized on {self.device}")
+
         # Load pretrained weights if provided
         if state_dict_path:
             try:
+                # Ensure state_dict is loaded to the same device as the model
+                state_dict_map_location = 'cuda' if torch.cuda.is_available() else 'cpu'
                 if state_dict_path.endswith('_embeddings.pt'):
                     # Load embeddings directly into node_emb
-                    embeddings = torch.load(state_dict_path, map_location='cpu')
+                    embeddings = torch.load(state_dict_path, map_location=state_dict_map_location)
                     self.model.node_emb.weight = nn.Parameter(embeddings)
-                    print(f"Loaded embeddings from {state_dict_path}")
+                    print(f"Loaded embeddings from {state_dict_path} to {self.device}")
                 else:
                     # Load model state dict
-                    state_dict = torch.load(state_dict_path, map_location='cpu')
+                    state_dict = torch.load(state_dict_path, map_location=state_dict_map_location)
                     self.model.load_state_dict(state_dict)
-                    print(f"Loaded model state from {state_dict_path}")
+                    print(f"Loaded model state from {state_dict_path} to {self.device}")
             except Exception as e:
                 print(f"Error loading state dict: {e}")
 
