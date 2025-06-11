@@ -9,24 +9,35 @@
 #include <iostream>
 #include <queue>
 #include <map>
+#include <chrono>   // Added
+#include <iomanip>  // Added
+
 using namespace std;
 
-vector<string> split(string s, const string& delimiter);
+// Helper function to get current timestamp
+std::string getCurrentTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
+vector<string> split(const string& s, char delimiter); // Changed delimiter to char
 
 struct Row
 {
     int edge_id, ts, label;
-    int u, v, edge_type; // Changed to int
+    int u, v, edge_type; 
     string split;
 };
-
-// using Node = pair<string, string>; // (node_id_string, node_type_string) // REMOVED
 
 int main(int argc, char **argv)
 {
     if (argc < 5)
     {
-        cerr << "Usage: " << argv[0] << " <csv_path> <max_hops> <thread_id> <num_threads>\n";
+        // Initial error to std::cerr as log_stream is not yet set up.
+        std::cerr << "[Error] " << getCurrentTimestamp() << " Usage: " << argv[0] << " <csv_path> <max_hops> <thread_id> <num_threads>\n";
         return 1;
     }
     string csv_path = argv[1];
@@ -34,102 +45,144 @@ int main(int argc, char **argv)
     int thread_id   = stoi(argv[3]);
     int num_threads = stoi(argv[4]);
 
-    ofstream log_stream("./logs.txt", ios_base::app);
+    string prefix = csv_path;
+    size_t suffix_pos = prefix.rfind("_edges.csv");
+    if (suffix_pos != string::npos) {
+        prefix.erase(suffix_pos);
+    }
+    // Adjusted log file name
+    string log_file_name = prefix + "_prepare_logs_" + to_string(num_threads) + "_" + to_string(thread_id) + ".txt";
 
-    log_stream << "Processing thread " << thread_id << " of " << num_threads << endl;
-    log_stream << "Max hops: " << max_hops << endl;
-    log_stream << "CSV path: " << csv_path << endl;
+    ofstream log_stream(log_file_name, ios_base::app);
+    if (!log_stream.is_open()) {
+        std::cerr << "[Error] " << getCurrentTimestamp() << " Failed to open log file: " << log_file_name << std::endl;
+        return 1; // Cannot proceed without log file
+    }
+
+    log_stream << "[Info] " << getCurrentTimestamp() << " Processing thread " << thread_id << " of " << num_threads << endl;
+    log_stream << "[Info] " << getCurrentTimestamp() << " Max hops: " << max_hops << endl;
+    log_stream << "[Info] " << getCurrentTimestamp() << " CSV path: " << csv_path << endl;
 
     // 1) Load CSV
-    // vector<map<string, string>> csv_data; // Removed
     vector<string> col_names;
     vector<Row> rows;
     unordered_map<int, int> node_id_to_type_map;   // Map from node_id to node_type
     {
         ifstream in(csv_path);
+        if (!in.is_open()) {
+            log_stream << "[Error] " << getCurrentTimestamp() << " Failed to open CSV file: " << csv_path << endl;
+            return 1;
+        }
         string header;
-        getline(in, header);
+        if (!getline(in, header)) {
+            log_stream << "[Error] " << getCurrentTimestamp() << " Failed to read header from CSV file: " << csv_path << endl;
+            return 1;
+        }
 
-        col_names = split(header, ",");
+        col_names = split(header, ','); 
 
         string line;
+        int line_num = 1;
         while (getline(in, line))
         {
-            vector<string> row_data_vec = split(line, ",");
-            unordered_map<string, string> row_map_data; // Changed to unordered_map
-            for (int i = 0; i < col_names.size(); ++i)
+            line_num++;
+            vector<string> row_data_vec = split(line, ','); 
+            if (row_data_vec.size() != col_names.size()) {
+                log_stream << "[Warning] " << getCurrentTimestamp() << " Line " << line_num << ": Skipping due to mismatched column count. Expected " << col_names.size() << ", got " << row_data_vec.size() << endl;
+                continue;
+            }
+            unordered_map<string, string> row_map_data; 
+            for (size_t i = 0; i < col_names.size(); ++i) // Use size_t for loop counter
                 row_map_data[col_names[i]] = row_data_vec[i];
 
             try {
                 Row row;
-                row.edge_type = stoi(row_map_data["edge_type"]); // Changed to stoi
-                row.split     = row_map_data["split"];
-                row.edge_id   = stoi(row_map_data["edge_id"]);
-                row.u         = stoi(row_map_data["u"]); // Changed to stoi
-                row.v         = stoi(row_map_data["v"]); // Changed to stoi
-                row.ts        = stoi(row_map_data["ts"]);
-                row.label     = stoi(row_map_data["label"]);
+                row.edge_type = stoi(row_map_data.at("edge_type")); 
+                row.split     = row_map_data.at("split");
+                row.edge_id   = stoi(row_map_data.at("edge_id"));
+                row.u         = stoi(row_map_data.at("u")); 
+                row.v         = stoi(row_map_data.at("v")); 
+                row.ts        = stoi(row_map_data.at("ts"));
+                row.label     = stoi(row_map_data.at("label"));
     
                 rows.push_back(row);
 
-                // Populate node type map during CSV loading
-                node_id_to_type_map[row.u] = stoi(row_map_data["u_type"]); // Use row_map_data directly
-                node_id_to_type_map[row.v] = stoi(row_map_data["v_type"]); // Use row_map_data directly
+                node_id_to_type_map[row.u] = stoi(row_map_data.at("u_type")); 
+                node_id_to_type_map[row.v] = stoi(row_map_data.at("v_type")); 
 
             }
-            catch (exception ex) {
-                ofstream log_stream("./logs.txt", ios_base::app);
-                
-                for (auto pair: row_map_data)
-                    log_stream << '(' << pair.first << ',' << pair.second << ')' << ' ';
-
-                log_stream << '\n' << ex.what() << '\n';
-
-                throw;
+            catch (const std::out_of_range& oor) {
+                log_stream << "[Error] " << getCurrentTimestamp() << " Line " << line_num << ": Missing expected column. Details: " << oor.what() << ". Row data: ";
+                for (auto const& [key, val] : row_map_data) {
+                    log_stream << '(' << key << ',' << val << ')' << ' ';
+                }
+                log_stream << endl;
+                // Decide if to throw or continue
+            }
+            catch (const std::invalid_argument& ia) {
+                 log_stream << "[Error] " << getCurrentTimestamp() << " Line " << line_num << ": Invalid argument for conversion. Details: " << ia.what() << ". Row data: ";
+                for (auto const& [key, val] : row_map_data) {
+                    log_stream << '(' << key << ',' << val << ')' << ' ';
+                }
+                log_stream << endl;
+                // Decide if to throw or continue
+            }
+            catch (const exception& ex) {
+                log_stream << "[Error] " << getCurrentTimestamp() << " Line " << line_num << ": An unexpected error occurred. Details: " << ex.what() << ". Row data: ";
+                for (auto const& [key, val] : row_map_data) {
+                    log_stream << '(' << key << ',' << val << ')' << ' ';
+                }
+                log_stream << endl;
+                throw; // Re-throw for unexpected critical errors
             }
         }
+        in.close(); // Explicitly close though RAII handles it
     }
 
-    log_stream << "Loaded " << rows.size() << " rows\n";
-    log_stream << "Columns: ";
+    log_stream << "[Info] " << getCurrentTimestamp() << " Loaded " << rows.size() << " rows" << endl;
+    log_stream << "[Info] " << getCurrentTimestamp() << " Columns: ";
     for (const auto &col : col_names)
         log_stream << col << " ";
-    log_stream << "\n";
+    log_stream << endl;
 
     // 2) Sort by ts desc, label desc
     sort(rows.begin(), rows.end(), [](auto &a, auto &b)
          {
-        if (a.ts != b.ts) return a.ts > b.ts; // Sort in descending order of ts
+        if (a.ts != b.ts) return a.ts > b.ts; 
         return a.label > b.label; });
+    log_stream << "[Info] " << getCurrentTimestamp() << " Rows sorted." << endl;
 
     // 3) Incremental graph storage
-    unordered_map<int, vector<pair<int, int>>> adj; // Key: node_id, Value: vector of (neighbor_id, edge_type) // Changed to int
-    // unordered_map<string, string> node_id_to_type_map;   // Map from node_id to node_type // MOVED
-    int cur_ts = rows.empty() ? 0 : rows.back().ts; // Initialize cur_ts to the last timestamp
+    unordered_map<int, vector<pair<int, int>>> adj; 
+    int cur_ts = rows.empty() ? 0 : rows.back().ts; 
     vector<Row> buffer;
+    int paths_found_count = 0; // Counter for paths found
 
     auto flush_buffer = [&]()
     {
         for (auto &buf_r : buffer)
         {
             if (buf_r.label != 1)
-                continue; // only positive
+                continue; 
             
-            // Populate node type map - REMOVED FROM HERE
-            // node_id_to_type_map[buf_r.u] = buf_r.u_type;
-            // node_id_to_type_map[buf_r.v] = buf_r.v_type;
-
-            // Add edges to adjacency list (neighbor_id, edge_type)
             adj[buf_r.u].emplace_back(buf_r.v, buf_r.edge_type); 
             adj[buf_r.v].emplace_back(buf_r.u, buf_r.edge_type); 
         }
         buffer.clear();
     };
 
+    // Output total paths count first (placeholder, will be updated)
+    // This line will be overwritten later if paths are found.
+    // If no paths are found, it will remain 0.
+    long paths_count_pos = cout.tellp(); // Get current position
+    cout << "0" << endl; // Placeholder for total paths count
+
+
     // 4) Process rows, and for query‐edges run BFS
+    log_stream << "[Info] " << getCurrentTimestamp() << " Starting BFS processing..." << endl;
     while (!rows.empty())
     {
-        Row& r = rows.back(); // Get the last row
+        Row& r = rows.back(); 
         if (r.ts != cur_ts)
         {
             flush_buffer();
@@ -140,24 +193,21 @@ int main(int argc, char **argv)
         bool do_query = (r.split != "pre") && (r.edge_id % num_threads == thread_id);
         if (do_query)
         {
-            // BFS with depth‐limit = max_hops
-            int src_id = r.u; // Changed to int
-            int dst_id = r.v; // Changed to int
+            int src_id = r.u; 
+            int dst_id = r.v; 
 
-            queue<int> q; // Queue stores node IDs // Changed to int
-            unordered_map<int, int> parent_map; // Key: child_id, Value: parent_id // Changed to int
-            unordered_map<int, int> node_depths;   // Key: node_id, Value: depth // Changed to int
+            queue<int> q; 
+            unordered_map<int, int> parent_map; 
+            unordered_map<int, int> node_depths;   
             
             q.push(src_id);
             node_depths[src_id] = 0; 
-            vector<int> best; // Stores path as a vector of node IDs // Changed to int
-            // bool path_to_dst_found_bfs = false; // Removed
-
+            vector<int> best; 
+            
             while (!q.empty())
             {
-                int cur_node_id = q.front(); // Changed to int
+                int cur_node_id = q.front(); 
                 q.pop();
-
                 int cur_depth = node_depths[cur_node_id];
 
                 if (cur_depth >= max_hops) 
@@ -165,11 +215,10 @@ int main(int argc, char **argv)
                     continue;
                 }
 
-                // Check if cur_node_id exists in adj before iterating
                 if (adj.count(cur_node_id)) {
-                    for (auto &pr : adj.at(cur_node_id)) // pr is pair<string, string> (neighbor_id, edge_type)
+                    for (auto &pr : adj.at(cur_node_id)) 
                     {
-                        int neighbor_node_id = pr.first; // Changed to int
+                        int neighbor_node_id = pr.first; 
                         if (!node_depths.count(neighbor_node_id)) 
                         {
                             parent_map[neighbor_node_id] = cur_node_id; 
@@ -177,7 +226,7 @@ int main(int argc, char **argv)
 
                             if (neighbor_node_id == dst_id) 
                             {
-                                int temp_node_id = dst_id; // Changed to int
+                                int temp_node_id = dst_id; 
                                 while (temp_node_id != src_id) 
                                 {
                                     best.push_back(temp_node_id);
@@ -185,97 +234,105 @@ int main(int argc, char **argv)
                                 }
                                 best.push_back(src_id);
                                 reverse(best.begin(), best.end());
-                                // path_to_dst_found_bfs = true; // Removed
                                 break; 
                             }
                             q.push(neighbor_node_id); 
                         }
                     }
                 }
-                if (!best.empty()) // If path was found
+                if (!best.empty()) 
                 {
                     break; 
                 }
             }
 
-            // Only print when a path is found
-            if (!best.empty()) // best is vector<string> (node IDs)
+            if (!best.empty()) 
             {
-                // Collect meta-paths
-                vector<int> edge_types; // Changed to int
-                vector<int> node_types_in_path; // Changed to int
+                paths_found_count++; // Increment counter
+                vector<int> edge_types; 
+                vector<int> node_types_in_path; 
                 for (size_t i = 0; i + 1 < best.size(); ++i)
                 {
-                    int current_path_node_id = best[i]; // Changed to int
-                    int next_path_node_id = best[i + 1]; // Changed to int
+                    int current_path_node_id = best[i]; 
+                    int next_path_node_id = best[i + 1]; 
+                    bool found_edge = false;
                     if (adj.count(current_path_node_id)) {
-                        for (auto &pr : adj.at(current_path_node_id)) // pr is (neighbor_id, edge_type)
+                        for (auto &pr : adj.at(current_path_node_id)) 
                         {
                             if (pr.first == next_path_node_id)
                             {
                                 edge_types.push_back(pr.second);
+                                found_edge = true;
                                 break;
                             }
                         }
                     }
+                    if (!found_edge) {
+                        // This case should ideally not happen if BFS found a valid path
+                        // through the existing adj list. Log if it does.
+                        log_stream << "[Warning] " << getCurrentTimestamp() << " Edge not found in adj between "
+                                   << current_path_node_id << " and " << next_path_node_id 
+                                   << " for EID " << r.edge_id << " path reconstruction." << endl;
+                        // Add a placeholder or handle error, e.g., edge_types.push_back(-1);
+                    }
                 }
-                for (const int& node_id_in_path : best) // Changed to int
+                for (const int& node_id_in_path : best) 
                 {
-                    // Ensure node_id_to_type_map has the type, otherwise handle (e.g., "UNKNOWN")
                     if (node_id_to_type_map.count(node_id_in_path)) {
                         node_types_in_path.push_back(node_id_to_type_map.at(node_id_in_path));
                     } else {
+                        log_stream << "[Warning] " << getCurrentTimestamp() << " Node type not found for node " << node_id_in_path 
+                                   << " in EID " << r.edge_id << ". Using fallback 0." << endl;
                         node_types_in_path.push_back(0); // Fallback
                     }
-                    // node_types_in_path.push_back(0); // Dummy value
                 }
 
-                // Print: edge_id ; hops ; node_ids ; node_types ; edge_types
-                cout << r.edge_id << ";";
-                cout << best.size() - 1 << ";";
+                // Output format: eid \n hops \n nodes \n node_types \n edge_types
+                cout << r.edge_id << "\n";
+                cout << best.size() - 1 << "\n"; // hops
 
                 for (size_t i = 0; i < best.size(); ++i)
                 {
-                    if (i)
-                        cout << ",";
-                    cout << best[i]; // best[i] is the string ID
+                    cout << best[i] << (i == best.size() - 1 ? "" : " ");
                 }
-                cout << ";";
+                cout << "\n";
 
                 for (size_t i = 0; i < node_types_in_path.size(); ++i)
                 {
-                    if (i)
-                        cout << ",";
-                    cout << node_types_in_path[i]; 
+                    cout << node_types_in_path[i] << (i == node_types_in_path.size() - 1 ? "" : " ");
                 }
-                cout << ";";
+                cout << "\n";
 
                 for (size_t i = 0; i < edge_types.size(); ++i)
                 {
-                    if (i)
-                        cout << ",";
-                    cout << edge_types[i];
+                    cout << edge_types[i] << (i == edge_types.size() - 1 ? "" : " ");
                 }
-                cout << endl;
+                cout << "\n"; // Newline after each complete path entry
             }
         }
-        rows.pop_back(); // Remove the processed row
+        rows.pop_back(); 
     }
-    // flush any remaining edges
     flush_buffer();
+    log_stream << "[Info] " << getCurrentTimestamp() << " BFS processing finished." << endl;
+
+    // Go back and write the actual total paths count
+    long end_pos = cout.tellp();
+    cout.seekp(paths_count_pos);
+    cout << paths_found_count; // Write actual count
+    cout.seekp(end_pos); // Return to the end to not mess up subsequent cout if any
+    cout.flush(); // Ensure it's written
+
+    log_stream << "[Info] " << getCurrentTimestamp() << " Found and wrote " << paths_found_count << " paths for thread " << thread_id << "." << endl;
+    log_stream.close();
     return 0;
 }
 
-vector<string> split(string s, const string& delimiter) {
+vector<string> split(const string& s, char delimiter) { // Changed to char delimiter
     vector<string> tokens;
-    size_t pos = 0;
     string token;
-    while ((pos = s.find(delimiter)) != string::npos) {
-        token = s.substr(0, pos);
+    stringstream ss(s);
+    while (getline(ss, token, delimiter)) {
         tokens.push_back(token);
-        s.erase(0, pos + delimiter.length());
     }
-    tokens.push_back(s);
-
     return tokens;
 }
