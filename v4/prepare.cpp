@@ -287,25 +287,25 @@ int main(int argc, char **argv)
                     }
                 }
 
-                // Output format: eid \n hops \n nodes \n node_types \n edge_types
-                cout << r.edge_id << "\n";
-                cout << best.size() - 1 << "\n"; // hops
+                // Output format: eid;hops;nodes;node_types;edge_types
+                cout << r.edge_id << ";";
+                cout << best.size() - 1 << ";"; // hops
 
                 for (size_t i = 0; i < best.size(); ++i)
                 {
-                    cout << best[i] << (i == best.size() - 1 ? "" : " ");
+                    cout << best[i] << (i == best.size() - 1 ? "" : ",");
                 }
-                cout << "\n";
+                cout << ";";
 
                 for (size_t i = 0; i < node_types_in_path.size(); ++i)
                 {
-                    cout << node_types_in_path[i] << (i == node_types_in_path.size() - 1 ? "" : " ");
+                    cout << node_types_in_path[i] << (i == node_types_in_path.size() - 1 ? "" : ",");
                 }
-                cout << "\n";
+                cout << ";";
 
                 for (size_t i = 0; i < edge_types.size(); ++i)
                 {
-                    cout << edge_types[i] << (i == edge_types.size() - 1 ? "" : " ");
+                    cout << edge_types[i] << (i == edge_types.size() - 1 ? "" : ",");
                 }
                 cout << "\n"; // Newline after each complete path entry
             }
