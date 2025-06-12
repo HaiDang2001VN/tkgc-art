@@ -171,11 +171,11 @@ int main(int argc, char **argv)
         buffer.clear();
     };
 
-    // Output total paths count first (placeholder, will be updated)
-    // This line will be overwritten later if paths are found.
-    // If no paths are found, it will remain 0.
-    long paths_count_pos = cout.tellp(); // Get current position
-    cout << "0" << endl; // Placeholder for total paths count
+    // // Output total paths count first (placeholder, will be updated)
+    // // This line will be overwritten later if paths are found.
+    // // If no paths are found, it will remain 0.
+    // long paths_count_pos = cout.tellp(); // Get current position
+    // cout << "0" << endl; // Placeholder for total paths count
 
 
     // 4) Process rows, and for query‐edges run BFS
@@ -315,12 +315,12 @@ int main(int argc, char **argv)
     flush_buffer();
     log_stream << "[Info] " << getCurrentTimestamp() << " BFS processing finished." << endl;
 
-    // Go back and write the actual total paths count
-    long end_pos = cout.tellp();
-    cout.seekp(paths_count_pos);
-    cout << paths_found_count; // Write actual count
-    cout.seekp(end_pos); // Return to the end to not mess up subsequent cout if any
-    cout.flush(); // Ensure it's written
+    // // Go back and write the actual total paths count
+    // long end_pos = cout.tellp();
+    // cout.seekp(paths_count_pos);
+    // cout << paths_found_count; // Write actual count
+    // cout.seekp(end_pos); // Return to the end to not mess up subsequent cout if any
+    // cout.flush(); // Ensure it's written
 
     log_stream << "[Info] " << getCurrentTimestamp() << " Found and wrote " << paths_found_count << " paths for thread " << thread_id << "." << endl;
     log_stream.close();
