@@ -11,5 +11,6 @@
   "nhead": 4,
   "num_layers": 3,
   "dropout": 0.1,
-  "store": "model"
+  "store": "model",
+  "save_text_embeddings": true
 }
