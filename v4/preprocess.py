@@ -95,38 +95,40 @@ def main():
 
     dataset_name = config.get('dataset')
     storage_dir = config.get('storage_dir', '.')
-    # num_threads_config is the total sharding factor the C++ code should be aware of.
     num_threads_config = config.get('num_threads', 1) 
-    model_name = config.get('model_name') 
-    # beam_width for C++ preprocess, can be num_neg from legacy configs or a specific beam_width field.
+    
+    # Get model_name from embedding_config
+    embedding_config_path_relative = config.get('embedding_config')
+    if not embedding_config_path_relative:
+        print(f"[Error] Python orchestrator: 'embedding_config' key not found in main configuration file: {cli_args.config}", file=sys.stderr)
+        sys.exit(1)
+
+    # Construct absolute path for embedding_config
+    # Assumes embedding_config_path_relative is relative to the directory of the main config file
+    main_config_dir = os.path.dirname(os.path.abspath(cli_args.config))
+    embedding_config_path_absolute = os.path.normpath(os.path.join(main_config_dir, embedding_config_path_relative))
+    
+    print(f"[Info] Python orchestrator: Loading embedding configuration from: {embedding_config_path_absolute}", file=sys.stderr)
+    embedding_config = load_configuration(embedding_config_path_absolute)
+    model_name = embedding_config.get('model_name')
+
+    if not model_name:
+        print(f"[Error] Python orchestrator: 'model_name' not found in embedding configuration file: {embedding_config_path_absolute}", file=sys.stderr)
+        sys.exit(1)
+
     beam_width = config.get('beam_width', config.get('num_neg', 20)) 
 
     if not dataset_name:
         print("[Error] Python orchestrator: 'dataset' not found in config.", file=sys.stderr)
         sys.exit(1)
-    if not model_name:
-        print("[Error] Python orchestrator: 'model_name' not found in config. This is required for the C++ preprocess binary.", file=sys.stderr)
-        sys.exit(1)
+    # model_name is already checked above
     if not os.path.exists(cli_args.binary):
         print(f"[Error] Python orchestrator: C++ binary not found at {cli_args.binary}", file=sys.stderr)
         sys.exit(1)
 
-
-    # Determine the number of C++ instances (tasks) to run.
-    # If sampling is set, it limits the number of shards processed.
-    # Otherwise, all num_threads_config shards are processed.
     tasks_to_run_count = cli_args.sampling if cli_args.sampling is not None else num_threads_config
-    tasks_to_run_count = min(tasks_to_run_count, num_threads_config) # Cannot run more tasks than total shards
-
-    # The pool size determines how many C++ processes run concurrently.
-    # It should ideally be <= tasks_to_run_count and also consider system resources.
-    # For simplicity, let's use tasks_to_run_count as pool_size, or a system-sensible default like os.cpu_count().
-    # However, to match `prepare.py`'s behavior where `run_threads` (sampling) controls pool size:
+    tasks_to_run_count = min(tasks_to_run_count, num_threads_config) 
     pool_size = tasks_to_run_count 
-    # If tasks_to_run_count is very large, user might want a smaller concurrent pool.
-    # For now, let pool_size be the number of tasks we intend to run.
-    # A more robust approach might cap pool_size at os.cpu_count().
-    # pool_size = min(tasks_to_run_count, os.cpu_count() or 1) # Example of capping
 
     print(f"[Info] Python orchestrator: Dataset: {dataset_name}, Partition: {cli_args.partition}, Model: {model_name}", file=sys.stderr)
     print(f"[Info] Python orchestrator: Total conceptual data shards (num_threads for C++): {num_threads_config}", file=sys.stderr)
@@ -135,8 +137,7 @@ def main():
 
     tasks_args_list = []
     for i in range(tasks_to_run_count):
-        current_task_thread_id = i # C++ thread_id will be 0, 1, ..., tasks_to_run_count-1
-        # Each C++ instance is told the total sharding factor is num_threads_config
+        current_task_thread_id = i 
         task_args = (
             cli_args.binary,
             dataset_name,
@@ -144,8 +145,8 @@ def main():
             model_name,
             beam_width,
             storage_dir,
-            num_threads_config,      # Total sharding factor C++ is aware of
-            current_task_thread_id   # Specific shard this C++ instance handles
+            num_threads_config,      
+            current_task_thread_id   
         )
         tasks_args_list.append(task_args)
 
