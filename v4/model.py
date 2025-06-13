@@ -95,7 +95,7 @@ class PathPredictor(LightningModule):
 
             paths = sample['paths']
             num_paths = len(paths)
-            max_len = max(p.size(0) for p in paths) if num_paths else 0
+            max_len = max(len(p) for p in paths) if num_paths else 0
             
             if 'shallow_emb' in sample:
                 meta_info.append((num_paths, max_len - 1))
