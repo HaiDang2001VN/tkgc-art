@@ -126,6 +126,7 @@ class PathPredictor(LightningModule):
     def on_validation_epoch_start(self):
         self.pos_scores = []
         self.neg_scores = []
+        self.path_lengths = []  # Track path lengths
 
     def training_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
@@ -154,33 +155,93 @@ class PathPredictor(LightningModule):
         diff, meta = self._predict(batch)
         
         if meta is None:
-            return None, None
+            return None
+        
+        batch_items = []  # Store structured items for each sample
+        losses = []
         
         ptr = 0
         for num_paths, length in meta:
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
+            
             if neg.numel():
                 mean, std = neg.mean(0), neg.std(0, unbiased=False)
-                z = (pos - mean)/(std+1e-8)
-                neg_z = (neg-mean)/(std+1e-8)
+                z_pos = (pos - mean)/(std+1e-8)
+                z_neg = (neg - mean)/(std+1e-8)
+                
+                # Calculate mean z-score for loss and positive percentile
+                mean_z_pos = z_pos.mean()
+                losses.append(mean_z_pos)
+                
+                # Convert mean z-score to percentile for positive sample
+                percentile_pos = torch.special.ndtr(mean_z_pos).item()
+                
+                # Keep individual percentiles for negative samples
+                percentile_neg = torch.special.ndtr(z_neg).flatten().tolist()
             else:
-                z = pos*0
-                neg_z = neg
-            self.pos_scores.extend(z.tolist())
-            self.neg_scores.extend(neg_z.flatten().tolist())
+                z_pos = pos*0
+                mean_z_pos = z_pos.mean()
+                losses.append(mean_z_pos)
+                percentile_pos = 0.5
+                percentile_neg = []
+            
+            # Create item with organized structure
+            item = {
+                'pos_score': percentile_pos,  # Single percentile from mean z-score
+                'neg_scores': percentile_neg,  # List of individual percentiles
+                'length': length,  # Path length for this sample
+            }
+            batch_items.append(item)
             ptr += num_paths
-        loss = -torch.tensor(self.pos_scores).mean()
+        
+        # Use negated z-scores for loss, similar to training_step
+        loss = -torch.stack(losses).mean() if losses else torch.tensor(0.0)
         
         self.log('val_loss', loss, on_step=True, prog_bar=True)
         
-        return loss, torch.tensor(self.pos_scores)
+        return {
+            'loss': loss,
+            'items': batch_items
+        }
 
     def on_validation_epoch_end(self, outputs):
-        # perform full evaluation using external evaluate()
+        if not outputs:
+            return
+        
+        # Extract and organize values
+        all_pos_scores = []
+        all_neg_scores = []
+        all_pos_lengths = []
+        all_neg_lengths = []
+        
+        for output in outputs:
+            if output is None:
+                continue
+            
+            for item in output['items']:
+                # Add the single positive score and its length
+                all_pos_scores.append(item['pos_score'])
+                all_pos_lengths.append(item['length'])
+                
+                # Add all negative scores with their corresponding lengths
+                all_neg_scores.extend(item['neg_scores'])
+                all_neg_lengths.extend([item['length']] * len(item['neg_scores']))
+        
+        # Convert lists to tensors for evaluation
+        pos_scores = torch.tensor(all_pos_scores) if all_pos_scores else torch.tensor([])
+        neg_scores = torch.tensor(all_neg_scores) if all_neg_scores else torch.tensor([])
+        pos_lengths = torch.tensor(all_pos_lengths) if all_pos_lengths else torch.tensor([])
+        neg_lengths = torch.tensor(all_neg_lengths) if all_neg_lengths else torch.tensor([])
+        
+        # Ensure lengths match corresponding scores
+        assert len(pos_scores) == len(pos_lengths), f"Mismatch: {len(pos_scores)} pos scores vs {len(pos_lengths)} pos lengths"
+        assert len(neg_scores) == len(neg_lengths), f"Mismatch: {len(neg_scores)} neg scores vs {len(neg_lengths)} neg lengths"
+        
+        # Perform evaluation using the collected data
         dataset_name = self.trainer.datamodule.dataset
-        results = evaluate(dataset_name, torch.tensor(
-            self.pos_scores), torch.tensor(self.neg_scores))
+        results = evaluate(dataset_name, pos_scores, neg_scores, pos_lengths, neg_lengths)
+        
         for k, v in results.items():
             self.log(k, v)
 

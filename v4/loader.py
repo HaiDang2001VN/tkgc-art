@@ -43,36 +43,74 @@ class EdgeDataset(Dataset):
     def __getitem__(self, idx):
         eid = self.edge_ids[idx]
         label = self.df.at[eid, 'label']
-        pos = self.pos_paths.get(str(eid), {}).get('nodes')
+        # Positive paths are expected to be lists of nodes already
+        pos_nodes = self.pos_paths.get(str(eid), {}).get('nodes')
         
-        if pos is None:
-            return None
+        if pos_nodes is None: # If no positive path, skip this item
+            # print(f"Warning: No positive path found for eid {eid}. Skipping item.")
+            return None # DataLoader will filter this out if batch_sampler is not used or if collate handles None
         
-        raw_negs = self.neg_paths.get(str(eid), [])
-        if self.num_neg is not None and len(raw_negs) > self.num_neg:
-            raw_negs = random.sample(raw_negs, self.num_neg)
-        negs = []
-        for p in raw_negs:
-            if all(isinstance(x, int) for x in p):
-                negs.append(p)
-            else:
-                negs.append(p[::2])
-        all_paths = [pos] + negs
-        item = {'paths': torch.tensor(all_paths, dtype=torch.long)}
-        item['label'] = torch.tensor(label, dtype=torch.long)
+        # Negative paths from preprocess.cpp are interleaved: [node0, edge_type1, node1, ...]
+        raw_neg_interleaved_paths = self.neg_paths.get(str(eid), [])
+        
+        if self.num_neg is not None and len(raw_neg_interleaved_paths) > self.num_neg:
+            raw_neg_interleaved_paths = random.sample(raw_neg_interleaved_paths, self.num_neg)
+        
+        negs_nodes_only = []
+        for p_interleaved in raw_neg_interleaved_paths:
+            # Extract nodes (elements at even indices)
+            # e.g., [n0, r1, n1, r2, n2] -> [n0, n1, n2]
+            nodes_in_path = p_interleaved[::2]
+            negs_nodes_only.append(nodes_in_path)
+            
+        # all_paths will be a list of (list of node_ids)
+        # e.g., [[pos_n1, pos_n2], [neg1_n1, neg1_n2, neg1_n3], [neg2_n1, neg2_n2]]
+        all_paths_nodes_only = [pos_nodes] + negs_nodes_only
+        
+        item = {}
+        # Store paths as a list of lists of integers. Tensor conversion (if needed) happens later,
+        # possibly after padding in the model or a more sophisticated collate_fn.
+        item['paths'] = all_paths_nodes_only
+        item['label'] = torch.tensor(label, dtype=torch.long) # Label is a single value
+
         if self.features_map is not None:
-            feats = []
-            fmap = self.features_map
-            for path in all_paths:
-                ft = torch.stack([torch.tensor(fmap[0][n]) for n in path], dim=0)
-                feats.append(ft)
-            item['features'] = torch.stack(feats, dim=0)
+            feats_for_all_paths = [] # This will be a list of tensors
+            fmap = self.features_map # Assuming fmap[0] contains node_id to feature tensor mapping
+            for node_list_for_one_path in all_paths_nodes_only:
+                if not node_list_for_one_path: # Handle empty path if it can occur
+                    # Append a zero-size tensor or handle as per model requirements
+                    # For now, let's assume paths are non-empty or model handles it.
+                    # If features are essential, an empty path might be an issue.
+                    # Example: feats_for_all_paths.append(torch.empty((0, feature_dim)))
+                    pass # Or raise error, or skip
+                
+                # Create a tensor of features for the current path
+                # Each feature fmap[0][n] is already a tensor or array-like
+                try:
+                    path_features_tensor = torch.stack([torch.as_tensor(fmap[0][n], dtype=torch.float) for n in node_list_for_one_path], dim=0)
+                    feats_for_all_paths.append(path_features_tensor)
+                except KeyError as e:
+                    # print(f"Warning: Feature key error {e} for eid {eid}. Path: {node_list_for_one_path}. Skipping feature for this path or item.")
+                    # Decide handling: skip item, skip path's features, or use placeholder
+                    return None # Simplest: skip item if features are crucial and missing
+
+            # item['features'] is a list of tensors, e.g. [(path1_len, feat_dim), (path2_len, feat_dim)]
+            item['features'] = feats_for_all_paths
+            
         if self.kge_proxy is not None:
-            embs = []
-            for path in all_paths:
-                node_ids = torch.tensor(path, dtype=torch.long)
-                embs.append(self.kge_proxy.model.node_emb(node_ids))
-            item['shallow_emb'] = torch.stack(embs, dim=0)
+            embs_for_all_paths = [] # This will be a list of tensors
+            for node_list_for_one_path in all_paths_nodes_only:
+                if not node_list_for_one_path:
+                    pass # Similar handling as features for empty paths
+
+                node_ids_tensor = torch.tensor(node_list_for_one_path, dtype=torch.long)
+                # kge_proxy.model.node_emb should return a tensor of shape (path_len, kge_dim)
+                path_kge_embs_tensor = self.kge_proxy.model.node_emb(node_ids_tensor)
+                embs_for_all_paths.append(path_kge_embs_tensor)
+            
+            # item['shallow_emb'] is a list of tensors, e.g. [(path1_len, kge_dim), (path2_len, kge_dim)]
+            item['shallow_emb'] = embs_for_all_paths
+            
         return item
 
 
