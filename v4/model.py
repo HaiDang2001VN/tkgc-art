@@ -52,7 +52,8 @@ class PathPredictor(LightningModule):
         dim_feedforward: int = 512,
         dropout: float = 0.1,
         lp_norm: int = 2,
-        max_hops: int = 10, # Added max_hops
+        max_hops: int = 10,
+        max_adjust: float = 0.1,  # Added max_adjust parameter
         norm_fn=None
     ):
         super().__init__()
@@ -64,7 +65,7 @@ class PathPredictor(LightningModule):
         self.input_proj = nn.Linear(
             self.hparams.emb_dim, self.hparams.hidden_dim)
         self.pos_encoder = PositionalEncoding(
-            self.hparams.hidden_dim, dropout, max_len=max_hops + 1, batch_first=True) # Use max_hops + 1
+            self.hparams.hidden_dim, dropout, max_len=max_hops + 1, batch_first=True)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.hparams.hidden_dim,
             nhead=nhead,
@@ -234,13 +235,21 @@ class PathPredictor(LightningModule):
         pos_lengths = torch.tensor(all_pos_lengths) if all_pos_lengths else torch.tensor([])
         neg_lengths = torch.tensor(all_neg_lengths) if all_neg_lengths else torch.tensor([])
         
-        # Ensure lengths match corresponding scores
-        assert len(pos_scores) == len(pos_lengths), f"Mismatch: {len(pos_scores)} pos scores vs {len(pos_lengths)} pos lengths"
-        assert len(neg_scores) == len(neg_lengths), f"Mismatch: {len(neg_scores)} neg scores vs {len(neg_lengths)} neg lengths"
+        # Apply score adjustment based on path length
+        max_hops = self.hparams.max_hops
+        max_adjust = self.hparams.get('max_adjust', 0.1)  # Default to 0.1 if not defined
         
-        # Perform evaluation using the collected data
+        # Calculate adjustment ratio based on length/max_hops
+        pos_ratio = pos_lengths.float() / max_hops
+        neg_ratio = neg_lengths.float() / max_hops
+        
+        # Apply adjustment to scores (no clamping)
+        adjusted_pos_scores = pos_scores + (pos_ratio * max_adjust)
+        adjusted_neg_scores = neg_scores + (neg_ratio * max_adjust)
+        
+        # Perform evaluation using the adjusted scores (without passing lengths)
         dataset_name = self.trainer.datamodule.dataset
-        results = evaluate(dataset_name, pos_scores, neg_scores, pos_lengths, neg_lengths)
+        results = evaluate(dataset_name, adjusted_pos_scores, adjusted_neg_scores)
         
         for k, v in results.items():
             self.log(k, v)
@@ -280,7 +289,8 @@ if __name__ == '__main__':
         dim_feedforward=cfg.get('dim_feedforward', 512),
         dropout=cfg.get('dropout', 0.1),
         lp_norm=lp,
-        max_hops=cfg.get('max_hops', 10), # Pass max_hops
+        max_hops=cfg.get('max_hops', 10),
+        max_adjust=cfg.get('max_adjust', 0.1),  # Read max_adjust from config
         norm_fn=norm_fn
     )
 
