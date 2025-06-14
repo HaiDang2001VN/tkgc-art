@@ -200,8 +200,6 @@ class PathPredictor(LightningModule):
         # Use negated z-scores for loss, similar to training_step
         loss = -torch.stack(losses).mean() if losses else torch.tensor(0.0)
         
-        self.log('val_loss', loss, on_step=True, prog_bar=True)
-        
         return {
             'loss': loss,
             'items': batch_items
@@ -218,10 +216,11 @@ class PathPredictor(LightningModule):
                 continue
             val_losses.append(output['loss'])
         
-        # Compute mean validation loss over the epoch
+        # Compute and log mean validation loss over the epoch
         if val_losses:
             mean_val_loss = torch.stack(val_losses).mean()
-            self.log('val_loss_epoch', mean_val_loss, prog_bar=True)
+            # This is the ONLY place val_loss is logged
+            self.log('val_loss', mean_val_loss, prog_bar=True)
         
         # Extract and organize values
         all_pos_scores = []
@@ -326,6 +325,8 @@ def main():
     
     # Create the log directory with the specified pattern
     log_dir = os.path.join(storage_dir, embedding_model, dataset_name)
+    print(f"Log directory: {log_dir}")
+    os.makedirs(log_dir, exist_ok=True)
     
     # Configure CSV logger
     logger = CSVLogger(
