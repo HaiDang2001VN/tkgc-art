@@ -1,4 +1,4 @@
-// g++ -std=c++23 -O3 -pthread -o preprocess preprocess.cpp
+// g++ -std=c++23 -O3 -pthread -o preprocess.o preprocess.cpp
 #include <iostream>
 #include <fstream>
 #include <sstream>

@@ -1,4 +1,4 @@
-// g++ -std=c++23 -O3 -pthread -o prepare prepare.cpp
+// g++ -std=c++23 -O3 -pthread -o prepare.o prepare.cpp
 #include <string>
 #include <vector>
 #include <unordered_map>

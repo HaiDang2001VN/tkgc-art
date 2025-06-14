@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
 
 # Evaluation utility
 from evaluation import evaluate  # assumes eval.py provides evaluate()
@@ -210,6 +211,18 @@ class PathPredictor(LightningModule):
         if not outputs:
             return
         
+        # Calculate epoch-level validation loss
+        val_losses = []
+        for output in outputs:
+            if output is None or 'loss' not in output:
+                continue
+            val_losses.append(output['loss'])
+        
+        # Compute mean validation loss over the epoch
+        if val_losses:
+            mean_val_loss = torch.stack(val_losses).mean()
+            self.log('val_loss_epoch', mean_val_loss, prog_bar=True)
+        
         # Extract and organize values
         all_pos_scores = []
         all_neg_scores = []
@@ -258,7 +271,7 @@ class PathPredictor(LightningModule):
         return torch.optim.Adam(self.parameters(), lr=1e-4)
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(
         description="Path prediction with Transformer encoder")
     parser.add_argument('--config', type=str, required=True)
@@ -294,6 +307,37 @@ if __name__ == '__main__':
         norm_fn=norm_fn
     )
 
+    # Extract storage directory
+    storage_dir = cfg.get('storage_dir', 'runs')
+    
+    # Get embedding model name from embedding config file
+    embedding_model = "default_model"  # Default fallback value
+    embedding_config_path = cfg.get('embedding_config')
+    if embedding_config_path and os.path.exists(embedding_config_path):
+        try:
+            with open(embedding_config_path, 'r') as f:
+                embedding_config = json.load(f)
+                embedding_model = embedding_config.get('model_name', embedding_model)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not load embedding config: {e}")
+    
+    # Get dataset name
+    dataset_name = dm.dataset  # Or cfg.get('dataset', 'default_dataset')
+    
+    # Create the log directory with the specified pattern
+    log_dir = os.path.join(storage_dir, embedding_model, dataset_name)
+    
+    # Configure CSV logger
+    logger = CSVLogger(
+        save_dir=log_dir,
+        name="lightning_logs",
+        version=None  # Auto-increment version
+    )
+    
     ckpt = ModelCheckpoint(monitor='val_loss', save_top_k=1, mode='min')
-    trainer = Trainer(max_epochs=max_epochs, callbacks=[ckpt])
+    trainer = Trainer(max_epochs=max_epochs, callbacks=[ckpt], logger=logger)
     trainer.fit(model, dm)
+
+
+if __name__ == '__main__':
+    main()
