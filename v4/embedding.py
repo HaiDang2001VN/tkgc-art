@@ -28,15 +28,15 @@ class KGEModelProxy(nn.Module):
             raise ValueError(
                 f"Model {self.model_name} not supported. Choose from: {list(self.MODEL_MAP.keys())}")
 
-        num_nodes = cfg.get('num_nodes')
-        num_relations = cfg.get('num_relations', 1)
-        hidden_channels = cfg.get('hidden_channels', 100)
+        num_nodes = int(cfg.get('num_nodes'))
+        num_relations = int(cfg.get('num_relations', 1))
+        hidden_channels = int(cfg.get('hidden_channels', 100))
         model_args = {'sparse': cfg.get('sparse', False)}
 
         if self.model_name in ['distmult', 'transe', 'rotate']:
-            model_args['margin'] = cfg.get('margin', 1.0)
+            model_args['margin'] = float(cfg.get('margin', 1.0))
         if self.model_name == 'transe':
-            model_args['p_norm'] = cfg.get('p_norm', 2)
+            model_args['p_norm'] = int(cfg.get('p_norm', 2))
 
         model_class = self.MODEL_MAP[self.model_name]
         self.model = model_class(
