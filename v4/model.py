@@ -100,6 +100,8 @@ class PathPredictor(LightningModule):
             paths = sample['paths']
             num_paths = len(paths)
             max_len = max(len(p) for p in paths) if num_paths else 0
+            print(paths)
+            raise ValueError("Debugging paths: " + str(paths))
             
             if 'shallow_emb' in sample:
                 meta_info.append((num_paths, max_len - 1))
