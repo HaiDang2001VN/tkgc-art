@@ -200,12 +200,13 @@ class PathPredictor(LightningModule):
         # Use negated z-scores for loss, similar to training_step
         loss = -torch.stack(losses).mean() if losses else torch.tensor(0.0)
         
-        return {
-            'loss': loss,
-            'items': batch_items
-        }
+        output = {'loss': loss, 'items': batch_items}
+        self.validation_step_outputs.append(output)
+        return output
 
-    def on_validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):  # No outputs parameter
+        outputs = self.validation_step_outputs
+        
         if not outputs:
             return
         
@@ -265,6 +266,8 @@ class PathPredictor(LightningModule):
         
         for k, v in results.items():
             self.log(k, v)
+
+        self.validation_step_outputs = []  # Clear the list for the next epoch
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-4)
