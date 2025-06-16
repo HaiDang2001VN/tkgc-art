@@ -14,8 +14,5 @@
   "dropout": 0.1,
   "store": "model",
   "save_text_embeddings": true,
-  "loader":
-  {
-    "shallow": true
-  }
+  "shallow": true
 }

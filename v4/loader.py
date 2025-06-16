@@ -130,11 +130,15 @@ class PathDataModule(LightningDataModule):
         self.storage_dir = cfg.get('storage_dir', '.')
         self.dataset = cfg['dataset']
         self.num_neg = cfg.get('num_neg', None)
-        loader_cfg = cfg.get('loader', {})
-        self.loader_cfg = loader_cfg
+        
         # Internal shallow flag
-        self._use_shallow = loader_cfg.get('shallow', False)
-        self.kge_proxy = None
+        self._use_shallow = cfg.get('shallow', False)
+        self.df = None
+        self.split_map = {}
+        self.data = {}
+        self.neg_paths = {}
+        self.kge_proxy = {}
+        self.features_map = {}
 
     @property
     def use_shallow(self) -> bool:
@@ -161,63 +165,67 @@ class PathDataModule(LightningDataModule):
 
     def setup(self, stage: Union[str, None] = None):
         edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
-        df = pd.read_csv(edges_fp, index_col='edge_id')
-        self.dfs = {s: df[df['split'] == s].copy()
-                    for s in ('train', 'valid', 'test')}
-        
-        self.pos_paths = {}
-        with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
-            n = int(f.readline())
-            for _ in range(n):
-                eid = f.readline().strip()
-                hops = int(f.readline())
-                nodes = [int(u) for u in f.readline().split()]
-                node_types = [int(t) for t in f.readline().split()]
-                edge_types = f.readline().split()
-                self.pos_paths[eid] = {
-                    "hops": hops,
-                    "nodes": nodes,
-                    "node_types": node_types,
-                    "edge_types": edge_types
-                }
-        
-        # Filter dataframes to only include edges with positive paths
-        for split in self.dfs:
-            valid_eids = [eid for eid in self.dfs[split].index if str(eid) in self.pos_paths]
-            self.dfs[split] = self.dfs[split].loc[valid_eids]
+        if self.df is None:
+            self.df = pd.read_csv(edges_fp, index_col='edge_id')
+            self.split_map = {row['edge_id']: row['split'] for _, row in self.df.iterrows()}
 
-        def neg_fn(s): return os.path.join(self.storage_dir,
-                                           f"{self.cfg.get('model_name','transe')}_{self.dataset}_{s}_neg.json")
-        self.neg_paths = {s: json.load(open(neg_fn(s)))
-                          for s in ('train', 'valid', 'test')}
-        feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
-        if os.path.exists(feat_fp):
-            fm = torch.load(feat_fp, weights_only=False)
-            if isinstance(fm, dict):
-                first = next(iter(fm.values()))
-                fmap = fm
+        if stage in ('train', 'valid', 'test'):
+            self.data[stage] = self.df[self.df['split'] == stage].copy()
+
+            pos_paths = {}
+            with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
+                n = int(f.readline())
+                for _ in range(n):
+                    eid = f.readline().strip()
+                    hops = int(f.readline())
+                    nodes = [int(u) for u in f.readline().split()]
+                    node_types = [int(t) for t in f.readline().split()]
+                    edge_types = f.readline().split()
+                    
+                    if self.split_map[eid] == stage:
+                        pos_paths[eid] = {
+                            "hops": hops,
+                            "nodes": nodes,
+                            "node_types": node_types,
+                            "edge_types": edge_types
+                        }
+
+            neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{stage}_neg.json")
+            self.neg_paths[stage] = json.load(open(neg_fn))
+
+            feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
+            if os.path.exists(feat_fp):
+                fm = torch.load(feat_fp, weights_only=False)
+                if isinstance(fm, dict):
+                    first = next(iter(fm.values()))
+                    fmap = fm
+                else:
+                    first = fm
+                    fmap = {0: fm}
+                if first.shape[1] == 0:
+                    self.features_map[stage] = None
+                else:
+                    self.features_map[stage] = fmap
             else:
-                first = fm
-                fmap = {0: fm}
-            if first.shape[1] == 0:
-                self.features_map = None
-            else:
-                self.features_map = fmap
-        else:
-            self.features_map = None
-        # force shallow if no features
-        if self.features_map is None:
-            self._use_shallow = True
-        if self.use_shallow and self.kge_proxy is None:
-            state = self.loader_cfg.get('state_dict_path', None)
-            self.kge_proxy = KGEModelProxy(
-                self.loader_cfg, state_dict_path=state)
-            self.kge_proxy.eval()
+                self.features_map[stage] = None
+
+            if self.features_map[stage] is None:
+                self._use_shallow = True
+            if self.use_shallow:
+                store = self.cfg.get('store', 'embedding')
+                suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
+                out_prefix = f"{self.model_name}_{self.dataset}_{stage}"
+                out_name = f"{out_prefix}{suffix}"
+                out_path = os.path.join(self.storage_dir, out_name)
+
+                if os.path.exists(out_path):
+                    self.kge_proxy[stage] = KGEModelProxy(self.loader_cfg, state_dict_path=out_path)
+                    self.kge_proxy[stage].eval()
 
     def _dataloader(self, split: str, shuffle: bool):
         ds = EdgeDataset(
-            self.dfs[split], self.pos_paths, self.neg_paths[split],
-            self.features_map, self.kge_proxy, num_neg=self.num_neg
+            self.data[split], self.pos_paths[split], self.neg_paths[split],
+            self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg
         )
         return DataLoader(ds, batch_size=self.batch_size, shuffle=shuffle,
                           pin_memory=True, collate_fn=collate_to_list)
