@@ -163,7 +163,7 @@ class PathDataModule(LightningDataModule):
         edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
         df = pd.read_csv(edges_fp, index_col='edge_id')
         self.dfs = {s: df[df['split'] == s].copy()
-                    for s in ('train', 'val', 'test')}
+                    for s in ('train', 'valid', 'test')}
         
         self.pos_paths = {}
         with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
