@@ -205,7 +205,7 @@ def main(config_path: str):
 
     partitions = {
         'train': (triples_for('pre'), triples_for('train')),
-        'val': (torch.cat([triples_for('pre'), triples_for('train')]), triples_for('valid')),
+        'valid': (torch.cat([triples_for('pre'), triples_for('train')]), triples_for('valid')),
         'test': (torch.cat([triples_for('pre'), triples_for('train'), triples_for('valid')]), triples_for('test'))
     }
 

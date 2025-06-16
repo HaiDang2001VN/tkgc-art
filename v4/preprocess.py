@@ -81,7 +81,8 @@ def main():
     parser = argparse.ArgumentParser(description="Python orchestrator for parallel C++ preprocess execution.")
     parser.add_argument('--config', required=True, help="Path to the main configuration JSON file.")
     parser.add_argument('--binary', required=True, help="Path to the compiled C++ preprocess binary.")
-    parser.add_argument('--partition', required=True, choices=['train', 'val', 'test'], help="Data partition to process (e.g., train, val, test).")
+    parser.add_argument('--partition', required=True, choices=[
+                        'train', 'valid', 'test'], help="Data partition to process (e.g., train, valid, test).")
     parser.add_argument('--sampling', type=int, default=None, help="Number of C++ threads (data shards) to process. If set, processes shards 0 to sampling-1. Defaults to num_threads from config.")
     
     cli_args = parser.parse_args()
