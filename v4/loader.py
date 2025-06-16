@@ -167,7 +167,7 @@ class PathDataModule(LightningDataModule):
         edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
         if self.df is None:
             self.df = pd.read_csv(edges_fp, index_col='edge_id')
-            self.split_map = {row['edge_id']: row['split'] for _, row in self.df.iterrows()}
+            self.split_map = {row.index: row['split'] for _, row in self.df.iterrows()}
 
         if stage in ('train', 'valid', 'test'):
             self.data[stage] = self.df[self.df['split'] == stage].copy()
