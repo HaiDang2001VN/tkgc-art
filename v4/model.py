@@ -79,6 +79,9 @@ class PathPredictor(LightningModule):
             encoder_layer, num_layers=num_layers)
         self.output_proj = nn.Linear(
             self.hparams.hidden_dim, self.hparams.emb_dim)
+        
+        # valid step outputs
+        self.validation_step_outputs = []
 
     def forward(self, src_emb: torch.Tensor) -> torch.Tensor:
         h = self.input_proj(src_emb)
