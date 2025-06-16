@@ -221,7 +221,7 @@ class PathDataModule(LightningDataModule):
         return self._dataloader('train', self.shuffle)
 
     def val_dataloader(self):
-        return self._dataloader('val', False)
+        return self._dataloader('valid', False)
 
     def test_dataloader(self):
         return self._dataloader('test', False)
