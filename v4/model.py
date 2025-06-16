@@ -225,6 +225,9 @@ class PathPredictor(LightningModule):
             mean_val_loss = torch.stack(val_losses).mean()
             # This is the ONLY place val_loss is logged
             self.log('val_loss', mean_val_loss, prog_bar=True)
+        else:
+            # If no valid outputs, log a warning
+            print("Warning: No valid outputs found in validation step. Skipping validation loss logging.")
         
         # Extract and organize values
         all_pos_scores = []
