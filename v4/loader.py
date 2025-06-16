@@ -169,17 +169,22 @@ class PathDataModule(LightningDataModule):
         with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
             n = int(f.readline())
             for _ in range(n):
-                eid = f.readline().strip()
-                hops = int(f.readline())
-                nodes = [int(u) for u in f.readline().split()]
-                node_types = [int(t) for t in f.readline().split()]
-                edge_types = f.readline().split()
-                self.pos_paths[eid] = {
-                    "hops": hops,
-                    "nodes": nodes,
-                    "node_types": node_types,
-                    "edge_types": edge_types
-                }
+            eid = f.readline().strip()
+            hops = int(f.readline())
+            nodes = [int(u) for u in f.readline().split()]
+            node_types = [int(t) for t in f.readline().split()]
+            edge_types = f.readline().split()
+            self.pos_paths[eid] = {
+                "hops": hops,
+                "nodes": nodes,
+                "node_types": node_types,
+                "edge_types": edge_types
+            }
+        
+        # Filter dataframes to only include edges with positive paths
+        for split in self.dfs:
+            valid_eids = [eid for eid in self.dfs[split].index if str(eid) in self.pos_paths]
+            self.dfs[split] = self.dfs[split].loc[valid_eids]
 
         def neg_fn(s): return os.path.join(self.storage_dir,
                                            f"{self.cfg.get('model_name','transe')}_{self.dataset}_{s}_neg.json")
