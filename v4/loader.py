@@ -184,7 +184,7 @@ class PathDataModule(LightningDataModule):
         def neg_fn(s): return os.path.join(self.storage_dir,
                                            f"{self.cfg.get('model_name','transe')}_{self.dataset}_{s}_neg.json")
         self.neg_paths = {s: json.load(open(neg_fn(s)))
-                          for s in ('train', 'val', 'test')}
+                          for s in ('train', 'valid', 'test')}
         feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
         if os.path.exists(feat_fp):
             fm = torch.load(feat_fp, weights_only=False)
