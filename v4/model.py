@@ -137,6 +137,7 @@ class PathPredictor(LightningModule):
         diff, meta = self._predict(batch)
         
         if meta is None:
+            print(f"meta is None at {batch_idx} batch_idx")
             return None
         
         losses, ptr = [], 0
@@ -160,6 +161,7 @@ class PathPredictor(LightningModule):
         diff, meta = self._predict(batch)
         
         if meta is None:
+            print(f"meta is None at {batch_idx} batch_idx")
             return None
         
         batch_items = []  # Store structured items for each sample
@@ -225,6 +227,7 @@ class PathPredictor(LightningModule):
             mean_val_loss = torch.stack(val_losses).mean()
             # This is the ONLY place val_loss is logged
             self.log('val_loss', mean_val_loss, prog_bar=True)
+            print(f"Validation loss: {mean_val_loss.item()}")
         else:
             # If no valid outputs, log a warning
             print("Warning: No valid outputs found in validation step. Skipping validation loss logging.")
