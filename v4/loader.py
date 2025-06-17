@@ -155,8 +155,7 @@ class PathDataModule(LightningDataModule):
             first = next(iter(self.features_map.values()))
             dim += first.shape[1]
         if self.use_shallow and self.kge_proxy is not None:
-            emb_dim = self.loader_cfg.get(
-                'hidden_channels') or self.kge_proxy.cfg.get('hidden_channels', 0)
+            emb_dim = self.cfg.get('hidden_channels') or self.kge_proxy.cfg.get('hidden_channels', 0)
             dim += emb_dim
         return dim
 
@@ -166,8 +165,8 @@ class PathDataModule(LightningDataModule):
     def setup(self, stage: Union[str, None] = None):
         edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
         if self.df is None:
-            self.df = pd.read_csv(edges_fp, index_col='edge_id')
-            self.split_map = {row.index: row['split'] for _, row in self.df.iterrows()}
+            self.df = pd.read_csv(edges_fp, index_col='edge_id')            
+            self.split_map = {str(idx): row['split'] for idx, row in self.df.iterrows()}
 
         if stage in ('train', 'valid', 'test'):
             self.data[stage] = self.df[self.df['split'] == stage].copy()
@@ -219,7 +218,7 @@ class PathDataModule(LightningDataModule):
                 out_path = os.path.join(self.storage_dir, out_name)
 
                 if os.path.exists(out_path):
-                    self.kge_proxy[stage] = KGEModelProxy(self.loader_cfg, state_dict_path=out_path)
+                    self.kge_proxy[stage] = KGEModelProxy(self.cfg, state_dict_path=out_path)
                     self.kge_proxy[stage].eval()
 
     def _dataloader(self, split: str, shuffle: bool):

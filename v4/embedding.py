@@ -28,7 +28,7 @@ class KGEModelProxy(nn.Module):
             raise ValueError(
                 f"Model {self.model_name} not supported. Choose from: {list(self.MODEL_MAP.keys())}")
 
-        num_nodes = int(cfg.get('num_nodes'))
+        num_nodes = int(cfg.get('num_nodes'))        
         num_relations = int(cfg.get('num_relations', 1))
         hidden_channels = int(cfg.get('hidden_channels', 100))
         model_args = {'sparse': cfg.get('sparse', False)}
