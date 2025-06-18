@@ -10,6 +10,7 @@ from torch.nn.utils.rnn import pad_sequence
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
+import torch.multiprocessing as mp
 
 # Evaluation utility
 from evaluation import evaluate  # assumes eval.py provides evaluate()
@@ -295,6 +296,9 @@ class PathPredictor(LightningModule):
 
 
 def main():
+    # Set start method to 'spawn' before any other multiprocessing code runs
+    mp.set_start_method('spawn', force=True)
+    
     parser = argparse.ArgumentParser(
         description="Path prediction with Transformer encoder")
     parser.add_argument('--config', type=str, required=True)
