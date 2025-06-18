@@ -214,16 +214,21 @@ class PathDataModule(LightningDataModule):
                 if self.features_map[split] is None:
                     self._use_shallow = True
                 
-                print(f"Use shallow embeddings: {self.use_shallow}")
-                if self.use_shallow:
+                embedding_config_path = self.cfg.get('embedding_config', 'full_embedding.json')
+                print(f"Use shallow embeddings: {self.use_shallow} at config {embedding_config_path}")
+                if self.use_shallow and os.path.exists(embedding_config_path):
                     store = self.cfg.get('store', 'embedding')
                     suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
-                    out_prefix = f"{self.model_name}_{self.dataset}_{split}"
-                    out_name = f"{out_prefix}{suffix}"
-                    out_path = os.path.join(self.storage_dir, out_name)
+                    
+                    embedding_config = json.load(open(embedding_config_path))
+                    model_name = embedding_config.get('model_name', 'transe')
 
-                    if os.path.exists(out_path):
-                        self.kge_proxy[split] = KGEModelProxy(self.cfg, state_dict_path=out_path)
+                    config_prefix = f"{model_name}_{self.dataset}_{split}"
+                    config_name = f"{config_prefix}{suffix}"
+                    config_path = os.path.join(self.storage_dir, config_name)
+
+                    if os.path.exists(config_path):
+                        self.kge_proxy[split] = KGEModelProxy(self.cfg, state_dict_path=config_path)
                         self.kge_proxy[split].eval()
 
                 print(f"Loaded {len(self.data[split])} edges for {split} split.")
