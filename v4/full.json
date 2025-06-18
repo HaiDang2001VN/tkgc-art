@@ -14,5 +14,6 @@
   "dropout": 0.1,
   "store": "model",
   "save_text_embeddings": true,
-  "shallow": true
+  "shallow": true,
+  "pre_scan": ["train"]
 }

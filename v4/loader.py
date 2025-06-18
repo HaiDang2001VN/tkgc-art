@@ -145,7 +145,15 @@ class PathDataModule(LightningDataModule):
         self.num_neg = cfg.get('num_neg', None)
         # Get num_threads for DataLoader num_workers
         self.num_workers = cfg.get('num_threads', 0)
-        
+        # Update pre_scan to accept a list of split names
+        self.pre_scan_splits = cfg.get('pre_scan', [])
+        # Convert to list if a string was provided
+        if isinstance(self.pre_scan_splits, str):
+            self.pre_scan_splits = [self.pre_scan_splits]
+        # For backwards compatibility: if boolean True was provided, scan all splits
+        elif isinstance(self.pre_scan_splits, bool) and self.pre_scan_splits:
+            self.pre_scan_splits = ['train', 'valid', 'test']
+    
         # Internal shallow flag
         self._use_shallow = cfg.get('shallow', False)
         self.df = None
@@ -212,8 +220,12 @@ class PathDataModule(LightningDataModule):
                 neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{split}_neg.json")
                 self.neg_paths[split] = json.load(open(neg_fn))
 
-                # Full pre-scan of all data points
-                self._pre_scan_all_data_points(split)
+                # Check if this split should be pre-scanned
+                if split in self.pre_scan_splits:
+                    print(f"Pre-scan enabled for {split} split. Running full data validation...")
+                    self._pre_scan_all_data_points(split)
+                else:
+                    print(f"Pre-scan not configured for {split} split. Skipping data validation.")
 
                 # Continue with the rest of setup...
                 feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
