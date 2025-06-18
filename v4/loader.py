@@ -8,6 +8,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from lightning.pytorch import LightningDataModule
 from typing import Union
+import multiprocessing as mp
+from functools import partial
+from tqdm import tqdm
 
 # Proxy for extracting shallow embeddings
 from embedding import KGEModelProxy
@@ -209,6 +212,10 @@ class PathDataModule(LightningDataModule):
                 neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{split}_neg.json")
                 self.neg_paths[split] = json.load(open(neg_fn))
 
+                # Full pre-scan of all data points
+                self._pre_scan_all_data_points(split)
+
+                # Continue with the rest of setup...
                 feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
                 if os.path.exists(feat_fp):
                     fm = torch.load(feat_fp, weights_only=False)
@@ -278,6 +285,99 @@ class PathDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return self._dataloader('test', False)
+
+    def _pre_scan_all_data_points(self, split):
+        """
+        Pre-scan ALL data points in parallel to validate the entire dataset
+        """
+        print(f"\n--- Pre-scanning ALL {split} data points using multiprocessing ---")
+        
+        total_edges = len(self.data[split])
+        edge_ids = self.data[split].index.astype(str).tolist()
+        
+        print(f"Scanning {total_edges} edges in {split} split...")
+        
+        # Define worker function for multiprocessing
+        def scan_edge(eid, pos_paths, neg_paths):
+            result = {
+                "valid": False,
+                "missing_pos": 0,
+                "missing_neg": 0, 
+                "empty_neg": 0
+            }
+            
+            # Check positive path
+            has_valid_pos = False
+            if eid in pos_paths and pos_paths[eid].get('nodes'):
+                has_valid_pos = True
+            else:
+                result["missing_pos"] = 1
+            
+            # Check negative paths
+            has_valid_neg = False
+            if eid in neg_paths:
+                if neg_paths[eid]:  # Check if the list is not empty
+                    has_valid_neg = True
+                else:
+                    result["empty_neg"] = 1
+            else:
+                result["missing_neg"] = 1
+            
+            # Check if edge is valid (has both positive and negative paths)
+            if has_valid_pos and has_valid_neg:
+                result["valid"] = True
+                
+            return result
+        
+        # Number of processes to use (adjust based on system capabilities)
+        num_processes = min(mp.cpu_count(), 8)  # Use up to 8 processes or CPU count, whichever is less
+        print(f"Using {num_processes} processes for parallel scanning")
+        
+        # Create partial function with fixed arguments
+        scan_func = partial(
+            scan_edge, 
+            pos_paths=self.pos_paths[split], 
+            neg_paths=self.neg_paths[split]
+        )
+        
+        # Process edges in parallel
+        results = []
+        with mp.Pool(processes=num_processes) as pool:
+            # Use tqdm to show progress bar
+            for result in tqdm(
+                pool.imap(scan_func, edge_ids),
+                total=total_edges, 
+                desc="Scanning edges"
+            ):
+                results.append(result)
+        
+        # Aggregate results
+        valid_edges = sum(r["valid"] for r in results)
+        missing_pos = sum(r["missing_pos"] for r in results)
+        missing_neg = sum(r["missing_neg"] for r in results)
+        empty_neg = sum(r["empty_neg"] for r in results)
+        
+        # Calculate statistics
+        valid_percent = (valid_edges / total_edges) * 100 if total_edges > 0 else 0
+        
+        # Print summary
+        print(f"\nPre-scan Results for {split}:")
+        print(f"  Total edges: {total_edges}")
+        print(f"  Valid edges (has pos & neg paths): {valid_edges} ({valid_percent:.1f}%)")
+        print(f"  Missing positive paths: {missing_pos} ({(missing_pos/total_edges)*100:.1f}%)")
+        print(f"  Missing negative paths: {missing_neg} ({(missing_neg/total_edges)*100:.1f}%)")
+        print(f"  Empty negative paths: {empty_neg} ({(empty_neg/total_edges)*100:.1f}%)")
+        
+        if valid_edges < total_edges:
+            print("\n⚠️  WARNING: Some edges are missing required path data!")
+            print(f"  Only {valid_percent:.1f}% of edges have complete data.")
+            print("  This may cause issues during training.\n")
+        else:
+            print("\n✓ All edges have complete path data.\n")
+        
+        print("--- Pre-scan complete ---\n")
+        
+        return valid_edges, total_edges
 
 
 if __name__ == '__main__':
