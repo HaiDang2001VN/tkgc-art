@@ -163,68 +163,73 @@ class PathDataModule(LightningDataModule):
         pass
 
     def setup(self, stage: Union[str, None] = None):
-        edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
-        if self.df is None:
-            self.df = pd.read_csv(edges_fp, index_col='edge_id')            
-            self.split_map = {str(idx): row['split'] for idx, row in self.df.iterrows()}
-
-        if stage in ('train', 'valid', 'test'):
+        if stage is "fit":
             print(f"Setting up data for stage: {stage}")
-            self.data[stage] = self.df[self.df['split'] == stage].copy()
+            edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
+            if self.df is None:
+                self.df = pd.read_csv(edges_fp, index_col='edge_id')            
+                self.split_map = {str(idx): row['split'] for idx, row in self.df.iterrows()}
 
-            pos_paths = {}
-            with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
-                n = int(f.readline())
-                for _ in range(n):
-                    eid = f.readline().strip()
-                    hops = int(f.readline())
-                    nodes = [int(u) for u in f.readline().split()]
-                    node_types = [int(t) for t in f.readline().split()]
-                    edge_types = f.readline().split()
-                    
-                    if self.split_map[eid] == stage:
-                        pos_paths[eid] = {
-                            "hops": hops,
-                            "nodes": nodes,
-                            "node_types": node_types,
-                            "edge_types": edge_types
-                        }
+            for split in ['train', 'valid', 'test']:
+                print(f"Setting up data for split: {split}")
+                self.data[split] = self.df[self.df['split'] == split].copy()
 
-            neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{stage}_neg.json")
-            self.neg_paths[stage] = json.load(open(neg_fn))
+                pos_paths = {}
+                with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
+                    n = int(f.readline())
+                    for _ in range(n):
+                        eid = f.readline().strip()
+                        hops = int(f.readline())
+                        nodes = [int(u) for u in f.readline().split()]
+                        node_types = [int(t) for t in f.readline().split()]
+                        edge_types = f.readline().split()
 
-            feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
-            if os.path.exists(feat_fp):
-                fm = torch.load(feat_fp, weights_only=False)
-                if isinstance(fm, dict):
-                    first = next(iter(fm.values()))
-                    fmap = fm
+                        if self.split_map[eid] == split:
+                            pos_paths[eid] = {
+                                "hops": hops,
+                                "nodes": nodes,
+                                "node_types": node_types,
+                                "edge_types": edge_types
+                            }
+
+                neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{split}_neg.json")
+                self.neg_paths[split] = json.load(open(neg_fn))
+
+                feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
+                if os.path.exists(feat_fp):
+                    fm = torch.load(feat_fp, weights_only=False)
+                    if isinstance(fm, dict):
+                        first = next(iter(fm.values()))
+                        fmap = fm
+                    else:
+                        first = fm
+                        fmap = {0: fm}
+                    if first.shape[1] == 0:
+                        self.features_map[split] = None
+                    else:
+                        self.features_map[split] = fmap
                 else:
-                    first = fm
-                    fmap = {0: fm}
-                if first.shape[1] == 0:
-                    self.features_map[stage] = None
-                else:
-                    self.features_map[stage] = fmap
-            else:
-                self.features_map[stage] = None
+                    self.features_map[split] = None
 
-            if self.features_map[stage] is None:
-                self._use_shallow = True
-            
-            print(f"Use shallow embeddings: {self.use_shallow}")
-            if self.use_shallow:
-                store = self.cfg.get('store', 'embedding')
-                suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
-                out_prefix = f"{self.model_name}_{self.dataset}_{stage}"
-                out_name = f"{out_prefix}{suffix}"
-                out_path = os.path.join(self.storage_dir, out_name)
+                if self.features_map[split] is None:
+                    self._use_shallow = True
+                
+                print(f"Use shallow embeddings: {self.use_shallow}")
+                if self.use_shallow:
+                    store = self.cfg.get('store', 'embedding')
+                    suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
+                    out_prefix = f"{self.model_name}_{self.dataset}_{split}"
+                    out_name = f"{out_prefix}{suffix}"
+                    out_path = os.path.join(self.storage_dir, out_name)
 
-                if os.path.exists(out_path):
-                    self.kge_proxy[stage] = KGEModelProxy(self.cfg, state_dict_path=out_path)
-                    self.kge_proxy[stage].eval()
+                    if os.path.exists(out_path):
+                        self.kge_proxy[split] = KGEModelProxy(self.cfg, state_dict_path=out_path)
+                        self.kge_proxy[split].eval()
+
+                print(f"Loaded {len(self.data[split])} edges for {split} split.")
+        else:
+            print(f"Data already setup during fit stage, skipping setup for stage: {stage}")
                     
-            print(f"Loaded {len(self.data[stage])} edges for {stage} stage.")
 
     def _dataloader(self, split: str, shuffle: bool):
         ds = EdgeDataset(
