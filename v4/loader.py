@@ -138,6 +138,8 @@ class PathDataModule(LightningDataModule):
         self.storage_dir = cfg.get('storage_dir', '.')
         self.dataset = cfg['dataset']
         self.num_neg = cfg.get('num_neg', None)
+        # Get num_threads for DataLoader num_workers
+        self.num_workers = cfg.get('num_threads', 0)
         
         # Internal shallow flag
         self._use_shallow = cfg.get('shallow', False)
@@ -256,8 +258,14 @@ class PathDataModule(LightningDataModule):
             self.data[split], self.pos_paths[split], self.neg_paths[split],
             self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg
         )
-        return DataLoader(ds, batch_size=self.batch_size, shuffle=shuffle,
-                          pin_memory=True, collate_fn=collate_to_list)
+        return DataLoader(
+            ds, 
+            batch_size=self.batch_size, 
+            shuffle=shuffle,
+            num_workers=self.num_workers,
+            pin_memory=True, 
+            collate_fn=collate_to_list
+        )
 
     def train_dataloader(self):
         return self._dataloader('train', self.shuffle)
