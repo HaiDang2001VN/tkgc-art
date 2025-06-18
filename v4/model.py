@@ -302,7 +302,12 @@ def main():
     dm.prepare_data()
     dm.setup()
 
-    norm_fn = dm.kge_proxy.norm if dm.kge_proxy is not None else None
+    # Update how norm_fn is retrieved from kge_proxy dictionary
+    norm_fn = None
+    if hasattr(dm, 'kge_proxy') and dm.kge_proxy and 'train' in dm.kge_proxy:
+        if dm.kge_proxy['train'] is not None:
+            norm_fn = dm.kge_proxy['train'].norm
+
     emb_dim = dm.emb_dim
     hidden_dim = cfg.get('hidden_dim', emb_dim)
     lp = cfg.get('lp_norm', 2)
