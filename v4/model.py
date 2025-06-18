@@ -97,7 +97,15 @@ class PathPredictor(LightningModule):
     def forward(self, src_emb: torch.Tensor) -> torch.Tensor:
         h = self.input_proj(src_emb)
         h = self.pos_encoder(h)
-        h = self.transformer(h, is_causal=True)
+        
+        # Generate causal mask for the sequence length
+        seq_len = h.size(1)
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(
+            seq_len, device=h.device
+        )
+        
+        # Pass the mask to the transformer instead of is_causal=True
+        h = self.transformer(h, mask=causal_mask)
         pred_emb = self.output_proj(h)
         return pred_emb
 
