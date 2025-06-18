@@ -66,18 +66,12 @@ class EdgeDataset(Dataset):
         # e.g., [[pos_n1, pos_n2], [neg1_n1, neg1_n2, neg1_n3], [neg2_n1, neg2_n2]]
         all_paths_nodes_only = [pos_nodes] + negs_nodes_only
         
-        # Determine device if kge_proxy is available
-        device = torch.device('cpu')
-        if self.kge_proxy is not None:
-            # Get the device from the KGE proxy model's parameters
-            device = next(self.kge_proxy.model.parameters()).device
-        
         item = {}
         # Store paths as a list of lists of integers. Tensor conversion (if needed) happens later,
         # possibly after padding in the model or a more sophisticated collate_fn.
         item['paths'] = all_paths_nodes_only
-        # Create label tensor on the correct device
-        item['label'] = torch.tensor(label, dtype=torch.long, device=device)
+        # Create label tensor on CPU
+        item['label'] = torch.tensor(label, dtype=torch.long)  # CPU default
         
         # if self.features_map is not None:
         #     feats_for_all_paths = [] # This will be a list of tensors
@@ -105,6 +99,9 @@ class EdgeDataset(Dataset):
 
         if self.kge_proxy is not None:
             embs_for_all_paths = [] # This will be a list of tensors
+            # Get device of KGE proxy model for intermediate operations
+            device = next(self.kge_proxy.model.parameters()).device
+            
             for node_list_for_one_path in all_paths_nodes_only:
                 if not node_list_for_one_path:
                     pass # Similar handling as features for empty paths
@@ -114,6 +111,9 @@ class EdgeDataset(Dataset):
                 
                 # kge_proxy.model.node_emb should return a tensor of shape (path_len, kge_dim)
                 path_kge_embs_tensor = self.kge_proxy.model.node_emb(node_ids_tensor)
+                
+                # Move embeddings to CPU before adding to list
+                path_kge_embs_tensor = path_kge_embs_tensor.cpu()
                 embs_for_all_paths.append(path_kge_embs_tensor)
             
             # item['shallow_emb'] is a list of tensors, e.g. [(path1_len, kge_dim), (path2_len, kge_dim)]
