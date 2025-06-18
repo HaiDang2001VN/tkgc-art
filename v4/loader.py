@@ -218,7 +218,7 @@ class PathDataModule(LightningDataModule):
                 print(f"Use shallow embeddings: {self.use_shallow} at config {embedding_config_path}")
                 if self.use_shallow and os.path.exists(embedding_config_path):
                     store = self.cfg.get('store', 'embedding')
-                    suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
+                    suffix = '_config.json'
                     
                     embedding_config = json.load(open(embedding_config_path))
                     model_name = embedding_config.get('model_name', 'transe')
