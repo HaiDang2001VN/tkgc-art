@@ -136,6 +136,7 @@ class PathDataModule(LightningDataModule):
         self.df = None
         self.split_map = {}
         self.data = {}
+        self.pos_paths = {}
         self.neg_paths = {}
         self.kge_proxy = {}
         self.features_map = {}
@@ -192,6 +193,7 @@ class PathDataModule(LightningDataModule):
                                 "edge_types": edge_types
                             }
 
+                self.pos_paths[split] = pos_paths
                 neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{split}_neg.json")
                 self.neg_paths[split] = json.load(open(neg_fn))
 
