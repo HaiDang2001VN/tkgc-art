@@ -45,7 +45,7 @@ class EdgeDataset(Dataset):
 
     def __getitem__(self, idx):
         eid = self.edge_ids[idx]
-        label = self.df.at[eid, 'label']
+        label = self.df.at[eid, 'label'].astype(int)
         # Positive paths are expected to be lists of nodes already
         pos_nodes = self.pos_paths.get(str(eid), {}).get('nodes')
         

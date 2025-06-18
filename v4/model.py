@@ -114,6 +114,7 @@ class PathPredictor(LightningModule):
         meta_info = []
         for sample in batch:
             if sample is None:
+                meta_info.append(sample["label"])
                 continue
 
             paths = sample['paths']
@@ -123,7 +124,7 @@ class PathPredictor(LightningModule):
             # raise ValueError("Debugging paths: " + str(paths))
             
             if 'shallow_emb' in sample:
-                meta_info.append((num_paths, max_len - 1))
+                meta_info.append((num_paths, max_len - 1, sample["label"]))
                 for idx in range(num_paths):
                     emb = sample['shallow_emb'][idx]
                     if sample.get('features') is not None:
@@ -164,7 +165,7 @@ class PathPredictor(LightningModule):
             return None
         
         losses, ptr = [], 0
-        for num_paths, length in meta:
+        for num_paths, length, label in meta:
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             if neg.numel():
@@ -172,7 +173,8 @@ class PathPredictor(LightningModule):
                 z = (pos - mean)/(std+1e-8)
             else:
                 z = pos*0
-            losses.append(z.mean())
+            
+            losses.append(z.mean() if label else -z.mean())
             ptr += num_paths
         loss = -torch.stack(losses).mean()
         
@@ -190,8 +192,19 @@ class PathPredictor(LightningModule):
         batch_items = []  # Store structured items for each sample
         losses = []
         
+        # TODO: process the label stuff in the following loop as well as on_validation_epoch_end
+        
         ptr = 0
-        for num_paths, length in meta:
+        for meta_info in meta:
+            if len(meta_info) == 1:
+                item = {
+                    "score": 0,
+                    "label": meta_info[0],  # Single label for this sample
+                }
+                batch_items.append(item)
+                continue
+            
+            num_paths, length = meta_info
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             
@@ -221,6 +234,7 @@ class PathPredictor(LightningModule):
                 'pos_score': percentile_pos,  # Single percentile from mean z-score
                 'neg_scores': percentile_neg,  # List of individual percentiles
                 'length': length,  # Path length for this sample
+                'label': meta_info[-1]  # Label for this sample
             }
             batch_items.append(item)
             ptr += num_paths
