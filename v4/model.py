@@ -14,6 +14,9 @@ from pytorch_lightning.loggers import CSVLogger
 # Evaluation utility
 from evaluation import evaluate  # assumes eval.py provides evaluate()
 
+# Import from utils
+from utils import norm as utils_norm
+
 # Assumes PathDataModule code is saved in path_datamodule.py
 from loader import PathDataModule
 
@@ -52,16 +55,23 @@ class PathPredictor(LightningModule):
         num_layers: int = 4,
         dim_feedforward: int = 512,
         dropout: float = 0.1,
-        lp_norm: int = 2,
+        lp_norm: int = None,
         max_hops: int = 10,
-        max_adjust: float = 0.1,  # Added max_adjust parameter
+        max_adjust: float = 0.1,
         norm_fn=None
     ):
         super().__init__()
         self.save_hyperparameters()
-        # normalization function: use kge_proxy.norm if provided, else torch.norm
-        self.norm_fn = norm_fn or (lambda tensor, dim: torch.norm(
-            tensor, p=self.hparams.lp_norm, dim=dim))
+        
+        # Use lp_norm if specified, otherwise use custom norm_fn if provided
+        if lp_norm is not None:
+            self.norm_fn = lambda tensor, dim: torch.norm(tensor, p=lp_norm, dim=dim)
+        elif norm_fn is not None:
+            self.norm_fn = norm_fn
+        else:
+            # Fallback to L2 norm if neither is provided
+            self.norm_fn = lambda tensor, dim: torch.norm(tensor, p=2, dim=dim)
+            
         # project input embeddings to transformer hidden size and back
         self.input_proj = nn.Linear(
             self.hparams.emb_dim, self.hparams.hidden_dim)
@@ -299,31 +309,46 @@ def main():
         batch_size=cfg.get('batch_size', 32),
         shuffle=cfg.get('shuffle', False)
     )
-    dm.prepare_data()
-    dm.setup()
-
-    # Update how norm_fn is retrieved from kge_proxy dictionary
-    norm_fn = None
-    if hasattr(dm, 'kge_proxy') and dm.kge_proxy and 'train' in dm.kge_proxy:
-        if dm.kge_proxy['train'] is not None:
-            norm_fn = dm.kge_proxy['train'].norm
-
-    emb_dim = dm.emb_dim
+    
+    # Get model_name from embedding config for normalization
+    model_name = None
+    emb_dim = None
+    embedding_config_path = cfg.get('embedding_config')
+    if embedding_config_path and os.path.exists(embedding_config_path):
+        try:
+            with open(embedding_config_path, 'r') as f:
+                embedding_config = json.load(f)
+                model_name = embedding_config.get('model_name', 'transe')
+                emb_dim = embedding_config.get('hidden_channels', 128)  # Default to 128 if not specified
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not load embedding config: {e}")
+    
     hidden_dim = cfg.get('hidden_dim', emb_dim)
-    lp = cfg.get('lp_norm', 2)
+    
+    # Check if lp_norm is in config
+    has_lp_norm = 'lp_norm' in cfg
+    
+    # Initialize model parameters
+    model_params = {
+        'emb_dim': emb_dim,
+        'hidden_dim': hidden_dim,
+        'nhead': cfg.get('nhead', 8),
+        'num_layers': cfg.get('num_layers', 4),
+        'dim_feedforward': cfg.get('dim_feedforward', 512),
+        'dropout': cfg.get('dropout', 0.1),
+        'max_hops': cfg.get('max_hops', 10),
+        'max_adjust': cfg.get('max_adjust', 0.1),
+    }
+    
+    # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
+    if has_lp_norm:
+        model_params['lp_norm'] = cfg['lp_norm']
+    else:
+        # Use utils.norm with model_name from embedding config
+        norm_fn = lambda tensor, dim: utils_norm(tensor, model=None, model_name=model_name, dim=dim)
+        model_params['norm_fn'] = norm_fn
 
-    model = PathPredictor(
-        emb_dim=emb_dim,
-        hidden_dim=hidden_dim,
-        nhead=cfg.get('nhead', 8),
-        num_layers=cfg.get('num_layers', 4),
-        dim_feedforward=cfg.get('dim_feedforward', 512),
-        dropout=cfg.get('dropout', 0.1),
-        lp_norm=lp,
-        max_hops=cfg.get('max_hops', 10),
-        max_adjust=cfg.get('max_adjust', 0.1),  # Read max_adjust from config
-        norm_fn=norm_fn
-    )
+    model = PathPredictor(**model_params)
 
     # Extract storage directory
     storage_dir = cfg.get('storage_dir', 'runs')

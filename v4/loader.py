@@ -169,6 +169,7 @@ class PathDataModule(LightningDataModule):
             self.split_map = {str(idx): row['split'] for idx, row in self.df.iterrows()}
 
         if stage in ('train', 'valid', 'test'):
+            print(f"Setting up data for stage: {stage}")
             self.data[stage] = self.df[self.df['split'] == stage].copy()
 
             pos_paths = {}
@@ -210,6 +211,8 @@ class PathDataModule(LightningDataModule):
 
             if self.features_map[stage] is None:
                 self._use_shallow = True
+            
+            print(f"Use shallow embeddings: {self.use_shallow}")
             if self.use_shallow:
                 store = self.cfg.get('store', 'embedding')
                 suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
@@ -220,6 +223,8 @@ class PathDataModule(LightningDataModule):
                 if os.path.exists(out_path):
                     self.kge_proxy[stage] = KGEModelProxy(self.cfg, state_dict_path=out_path)
                     self.kge_proxy[stage].eval()
+                    
+            print(f"Loaded {len(self.data[stage])} edges for {stage} stage.")
 
     def _dataloader(self, split: str, shuffle: bool):
         ds = EdgeDataset(
