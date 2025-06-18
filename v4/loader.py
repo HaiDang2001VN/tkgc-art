@@ -163,7 +163,7 @@ class PathDataModule(LightningDataModule):
         pass
 
     def setup(self, stage: Union[str, None] = None):
-        if stage is "fit":
+        if stage == "fit":
             print(f"Setting up data for stage: {stage}")
             edges_fp = os.path.join(self.storage_dir, f"{self.dataset}_edges.csv")
             if self.df is None:
