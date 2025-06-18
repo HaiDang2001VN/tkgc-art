@@ -128,8 +128,10 @@ class PathPredictor(LightningModule):
 
         src_seq = [e[:-1] for e in all_emb]
         tgt_seq = [e[1:] for e in all_emb]
-        src_emb = torch.tensor(pad_sequence(src_seq, batch_first=True, padding_value=0.0))
-        tgt_emb = torch.tensor(pad_sequence(tgt_seq, batch_first=True, padding_value=0.0))
+        src_emb = pad_sequence(src_seq, batch_first=True,
+                               padding_value=0.0, padding_side="right").detach()
+        tgt_emb = pad_sequence(tgt_seq, batch_first=True,
+                               padding_value=0.0, padding_side="right").detach()
         return src_emb, tgt_emb, meta_info
 
     def _predict(self, batch: list[dict]):
