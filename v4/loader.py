@@ -109,12 +109,14 @@ class EdgeDataset(Dataset):
                 # Create node_ids_tensor on the same device as the KGE model
                 node_ids_tensor = torch.tensor(node_list_for_one_path, dtype=torch.long, device=device)
                 
-                # kge_proxy.model.node_emb should return a tensor of shape (path_len, kge_dim)
-                path_kge_embs_tensor = self.kge_proxy.model.node_emb(node_ids_tensor)
-                
-                # Move embeddings to CPU before adding to list
-                path_kge_embs_tensor = path_kge_embs_tensor.cpu()
-                embs_for_all_paths.append(path_kge_embs_tensor)
+                # Wrap the embedding extraction in no_grad context:
+                with torch.no_grad():
+                    # kge_proxy.model.node_emb should return a tensor of shape (path_len, kge_dim)
+                    path_kge_embs_tensor = self.kge_proxy.model.node_emb(node_ids_tensor)
+                    
+                    # Move embeddings to CPU before adding to list
+                    path_kge_embs_tensor = path_kge_embs_tensor.cpu()
+                    embs_for_all_paths.append(path_kge_embs_tensor)
             
             # item['shallow_emb'] is a list of tensors, e.g. [(path1_len, kge_dim), (path2_len, kge_dim)]
             item['shallow_emb'] = embs_for_all_paths
@@ -263,7 +265,8 @@ class PathDataModule(LightningDataModule):
             batch_size=self.batch_size, 
             shuffle=shuffle,
             num_workers=self.num_workers,
-            pin_memory=True, 
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0,  # Only enable when using workers
             collate_fn=collate_to_list
         )
 
