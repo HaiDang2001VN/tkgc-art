@@ -228,6 +228,7 @@ class PathDataModule(LightningDataModule):
                     config_path = os.path.join(self.storage_dir, config_name)
 
                     if os.path.exists(config_path):
+                        print(f"Loading KGE model proxy for {split} split from {config_path}")
                         self.kge_proxy[split] = KGEModelProxy(self.cfg, state_dict_path=config_path)
                         self.kge_proxy[split].eval()
 
