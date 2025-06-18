@@ -151,8 +151,8 @@ class PathDataModule(LightningDataModule):
         Returns the total embedding dimension: feature dim + shallow KGE dim (if used).
         """
         dim = 0
-        if hasattr(self, 'features_map') and self.features_map["train"] is not None:
-            first = next(iter(self.features_map["train"].values()))
+        if hasattr(self, 'features_map') and self.features_map[0] is not None:
+            first = self.features_map[0]
             dim += first.shape[1]
         if self.use_shallow and self.kge_proxy["train"] is not None:
             emb_dim = self.cfg.get('hidden_channels') or self.kge_proxy["train"].cfg.get('hidden_channels', 0)
