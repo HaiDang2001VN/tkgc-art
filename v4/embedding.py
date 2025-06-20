@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.nn.kge import DistMult, ComplEx, RotatE, TransE
 from utils import load_configuration, norm as utils_norm
 import numpy as np
+import multiprocessing as mp
 
 
 class KGEModelProxy(nn.Module):
@@ -179,70 +180,81 @@ class KGEModelProxy(nn.Module):
         return proxy, embeddings
 
 
+def _train_and_save(args):
+    """
+    Worker fn for multiprocessing
+    args = (name, train_triples, val_triples, embed_cfg, main_cfg, device)
+    """
+    name, tr, val, embed_cfg, main_cfg, device = args
+    proxy_model, embeddings = KGEModelProxy.train_model(
+        train_triples=tr, val_triples=val, cfg=embed_cfg, device=device, name_suffix=name
+    )
+
+    store = main_cfg.get('store', 'embedding')
+    suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
+    out_prefix = f"{embed_cfg.get('model_name','model')}_{main_cfg['dataset']}_{name}"
+    out_name = f"{out_prefix}{suffix}"
+    out_path = os.path.join(main_cfg['storage_dir'], out_name)
+
+    if store == 'embedding':
+        torch.save(embeddings, out_path)
+        print(f"[{name}] Saved embeddings to {out_path}")
+    else:
+        torch.save(proxy_model.model.state_dict(), out_path)
+        print(f"[{name}] Saved model state to {out_path}")
+
+    if main_cfg.get('save_text_embeddings', False):
+        proxy_model.save_embeddings_as_text(out_prefix, main_cfg['storage_dir'])
+
+    # also save the config used
+    config_out = {**embed_cfg, 'model_name': embed_cfg.get('model_name','model')}
+    cfg_name = f"{out_prefix}_config.json"
+    cfg_path = os.path.join(main_cfg['storage_dir'], cfg_name)
+    with open(cfg_path, 'w') as f:
+        json.dump(config_out, f, indent=4)
+    print(f"[{name}] Saved config to {cfg_path}")
+
 def main(config_path: str):
     main_cfg = load_configuration(config_path)
-    embed_cfg_path = main_cfg.get('embedding_config')
-    if not embed_cfg_path:
-        raise KeyError("'embedding_config' missing in main config.")
-
-    with open(embed_cfg_path) as f:
+    with open(main_cfg['embedding_config']) as f:
         embed_cfg = json.load(f)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    csv_file = os.path.join(
-        main_cfg['storage_dir'], f"{main_cfg['dataset']}_edges.csv")
-    df = pd.read_csv(csv_file)
-    df_pos = df[df['label'] == 1]
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    df = pd.read_csv(os.path.join(main_cfg['storage_dir'], f"{main_cfg['dataset']}_edges.csv"))
+    df_pos = df[df['label']==1]
 
     def triples_for(split: str) -> torch.Tensor:
-        d = df_pos[df_pos['split'] == split]
-        return torch.tensor(d[['u', 'edge_type', 'v']].values, dtype=torch.long)
+        d = df_pos[df_pos['split']==split]
+        return torch.tensor(d[['u','edge_type','v']].values, dtype=torch.long)
 
     partitions = {
         'train': (triples_for('pre'), triples_for('train')),
         'valid': (torch.cat([triples_for('pre'), triples_for('train')]), triples_for('valid')),
-        'test': (torch.cat([triples_for('pre'), triples_for('train'), triples_for('valid')]), triples_for('test'))
+        'test':  (torch.cat([triples_for('pre'), triples_for('train'), triples_for('valid')]), triples_for('test'))
     }
+    # new “all” partition: train on everything, eval on test
+    all_tr = torch.cat([triples_for(s) for s in ['pre','train','valid']])
+    partitions['all'] = (all_tr, triples_for('test'))
 
-    num_nodes = int(df[['u', 'v']].max().max()) + 1
-    num_relations = int(df_pos['edge_type'].nunique())
-    embed_cfg.update({'num_nodes': num_nodes, 'num_relations': num_relations})
-    model_name_from_embed_cfg = embed_cfg.get('model_name', 'model')
+    # ensure spawn start for CUDA safety
+    mp.set_start_method('spawn', force=True)
+    ctx = mp.get_context('spawn')
 
+    # build task list
+    tasks = []
     for name, (tr, val) in partitions.items():
-        proxy_model, embeddings = KGEModelProxy.train_model(
-            train_triples=tr, val_triples=val, cfg=embed_cfg, device=device, name_suffix=name
-        )
+        cfg_copy = dict(embed_cfg)  # avoid shared state
+        tasks.append((name, tr, val, cfg_copy, main_cfg, device))
 
-        store = main_cfg.get('store', 'embedding')
-        suffix = '_embeddings.pt' if store == 'embedding' else '_model.pt'
-        out_prefix = f"{model_name_from_embed_cfg}_{main_cfg['dataset']}_{name}"
-        out_name = f"{out_prefix}{suffix}"
-        out_path = os.path.join(main_cfg['storage_dir'], out_name)
+    # read num_threads from config or use cpu_count()
+    max_threads = main_cfg.get('num_threads', mp.cpu_count())
+    num_procs   = min(len(tasks), max_threads)
 
-        if store == 'embedding':
-            torch.save(embeddings, out_path)
-            print(f"Saved {name} embeddings to {out_path}")
-        else:
-            torch.save(proxy_model.model.state_dict(), out_path)
-            print(f"Saved {name} model state to {out_path}")
-
-        # NEW: Save embeddings as text if configured
-        if main_cfg.get('save_text_embeddings', False):
-            proxy_model.save_embeddings_as_text(
-                out_prefix, main_cfg['storage_dir'])
-
-        embed_cfg['model_name'] = model_name_from_embed_cfg
-        config_out_name = f"{out_prefix}_config.json"
-        config_out_path = os.path.join(
-            main_cfg['storage_dir'], config_out_name)
-        with open(config_out_path, 'w') as f_out:
-            json.dump(embed_cfg, f_out, indent=4)
-        print(f"Saved {name} embedding config to {config_out_path}")
-
+    with ctx.Pool(processes=num_procs) as pool:
+        pool.map(_train_and_save, tasks)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser("Train KGE from CSV via Proxy")
+    parser = argparse.ArgumentParser("Train KGE via Proxy (parallel)")
     parser.add_argument('--config', type=str, required=True)
     args = parser.parse_args()
     main(args.config)

@@ -261,6 +261,10 @@ std::vector<Path> beam_search_for_edge(
     current_beam.push_back({u});
 
     int max_depth = static_cast<int>(pattern.steps.size());
+    
+    // Determine whether to exclude direct neighbors based on hop count
+    // If pattern has >= 2 steps (hops), then exclude direct neighbors at the end
+    bool exclude_direct_neighbors = (max_depth >= 2);
 
     for (int depth = 0; depth < max_depth; ++depth)
     {
@@ -295,12 +299,13 @@ std::vector<Path> beam_search_for_edge(
             for (auto rev_it = std::reverse_iterator(upper_it);
                  rev_it != ts_to_neighbors.rend(); ++rev_it)
             {
-
                 int timestamp = rev_it->first;
                 int neighbor_node = rev_it->second;
 
-                // Skip direct neighbors for paths of depth > 0
-                if (depth > 0 && direct_neighbors.count(neighbor_node))
+                // Only exclude direct neighbors at the final step (depth == max_depth-1) 
+                // and only if the path has >= 2 hops
+                // if (exclude_direct_neighbors && depth == (max_depth - 1) && direct_neighbors.count(neighbor_node))
+                if (exclude_direct_neighbors && depth > 0 && direct_neighbors.count(neighbor_node))
                     continue;
 
                 // Verify neighbor node type matches expected
