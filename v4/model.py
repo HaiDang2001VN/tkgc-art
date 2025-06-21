@@ -171,10 +171,8 @@ class PathPredictor(LightningModule):
             if neg.numel():
                 mean, std = neg.mean(0), neg.std(0, unbiased=False)
                 z = (pos - mean)/(std+1e-8)
-            else:
-                z = pos * 0
+                losses.append(z.mean() if label else -z.mean())
             
-            losses.append(z.mean() if label else -z.mean())
             ptr += num_paths
         loss = -torch.stack(losses).mean()
         
@@ -204,13 +202,6 @@ class PathPredictor(LightningModule):
             
             num_paths, length, label = meta_info
             
-            if num_paths == 1:
-                batch_items.append({
-                    "score": 1,
-                    "label": label,  # Single label for this sample
-                })
-                continue
-            
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             
@@ -221,19 +212,18 @@ class PathPredictor(LightningModule):
                 
                 # Convert mean z-score to percentile for positive sample
                 percentile_pos = torch.special.ndtr(mean_z_pos).item()
-            else:
-                z_pos = pos * 0
-                mean_z_pos = z_pos.mean()
-                percentile_pos = 0.5
                 
-            # Calculate mean z-score for loss
-            losses.append(mean_z_pos if label else -mean_z_pos)
-            
+                # Calculate mean z-score for loss
+                losses.append(mean_z_pos if label else -mean_z_pos)
+            else:
+                percentile_pos = 1
+
             # Create item with organized structure
             item = {
                 'score': percentile_pos,  # Single percentile from mean z-score
                 'length': length,  # Path length for this sample
-                'label': label  # Label for this sample
+                'label': label,  # Label for this sample
+                'has_neg': neg.numel() > 0
             }
             batch_items.append(item)
             ptr += num_paths
@@ -241,19 +231,13 @@ class PathPredictor(LightningModule):
         # Use negated z-scores for loss, similar to training_step
         loss = -torch.stack(losses).mean() if losses else torch.tensor(0.0)
         
-        output = {'loss': loss, 'items': batch_items}
-        self.validation_step_outputs.append(output)
-        return output
+        self.validation_step_outputs.append({'loss': loss, 'items': batch_items})
+        return loss
 
-    def on_validation_epoch_end(self):  # No outputs parameter
-        outputs = self.validation_step_outputs
-        
-        if not outputs:
-            return
-        
+    def on_validation_epoch_end(self):        
         # Calculate epoch-level validation loss
         val_losses = []
-        for output in outputs:
+        for output in self.validation_step_outputs:
             if output is None or 'loss' not in output:
                 continue
             val_losses.append(output['loss'])
@@ -269,50 +253,53 @@ class PathPredictor(LightningModule):
             print("Warning: No valid outputs found in validation step. Skipping validation loss logging.")
         
         # Extract and organize values
-        all_pos_scores = []
-        all_neg_scores = []
-        all_pos_lengths = []
-        all_neg_lengths = []
+        scores = []
+        lengths = []
+        labels = []
+        has_neg = []
         
-        for output in outputs:
+        for output in self.validation_step_outputs:
             if output is None:
                 continue
             
             for item in output['items']:
-                # Add the single positive score and its length
-                all_pos_scores.append(item['pos_score'])
-                all_pos_lengths.append(item['length'])
+                if 'length' not in item:
+                    ...
                 
-                # Add all negative scores with their corresponding lengths
-                all_neg_scores.extend(item['neg_scores'])
-                all_neg_lengths.extend([item['length']] * len(item['neg_scores']))
+                # Add the single positive score and its length
+                scores.append(item['score'])
+                lengths.append(item['length'])
+                labels.append(item['label'])
+                has_neg.append(item['has_neg'])
         
         # Convert lists to tensors for evaluation
-        pos_scores = torch.tensor(all_pos_scores) if all_pos_scores else torch.tensor([])
-        neg_scores = torch.tensor(all_neg_scores) if all_neg_scores else torch.tensor([])
-        pos_lengths = torch.tensor(all_pos_lengths) if all_pos_lengths else torch.tensor([])
-        neg_lengths = torch.tensor(all_neg_lengths) if all_neg_lengths else torch.tensor([])
+        scores = torch.tensor(scores)
+        lengths = torch.tensor(lengths)
+        labels = torch.tensor(labels)
+        has_neg = torch.tensor(has_neg)
         
         # Apply score adjustment based on path length
         max_hops = self.hparams.max_hops
         max_adjust = self.hparams.get('max_adjust', 0.1)  # Default to 0.1 if not defined
         
         # Calculate adjustment ratio based on length/max_hops
-        pos_ratio = pos_lengths.float() / max_hops
-        neg_ratio = neg_lengths.float() / max_hops
+        ratios = lengths.float() / max_hops
         
         # Apply adjustment to scores (no clamping)
-        adjusted_pos_scores = pos_scores + (pos_ratio * max_adjust)
-        adjusted_neg_scores = neg_scores + (neg_ratio * max_adjust)
+        if self.cfg.get('adjust_no_neg_paths_samples', True):
+            adjusted_scores = scores + (ratios * max_adjust)
+        else:
+            adjusted_scores = scores
+            adjusted_scores[has_neg] = scores[has_neg] + (ratios[has_neg] * max_adjust[has_neg])
         
         # Perform evaluation using the adjusted scores (without passing lengths)
         dataset_name = self.trainer.datamodule.dataset
-        results = evaluate(dataset_name, adjusted_pos_scores, adjusted_neg_scores)
+        results = evaluate(dataset_name, adjusted_scores[labels == 1], adjusted_scores[labels == 0])
         
         for k, v in results.items():
             self.log(k, v)
 
-        self.validation_step_outputs = []  # Clear the list for the next epoch
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-4)
