@@ -146,13 +146,10 @@ class PathDataModule(LightningDataModule):
         # Get num_threads for DataLoader num_workers
         self.num_workers = cfg.get('num_threads', mp.cpu_count())
         # Update pre_scan to accept a list of split names
-        self.pre_scan_splits = cfg.get('pre_scan', [])
+        self.filter_splits = cfg.get('pre_scan', [])
         # Convert to list if a string was provided
-        if isinstance(self.pre_scan_splits, str):
-            self.pre_scan_splits = [self.pre_scan_splits]
-        # For backwards compatibility: if boolean True was provided, scan all splits
-        elif isinstance(self.pre_scan_splits, bool) and self.pre_scan_splits:
-            self.pre_scan_splits = ['train', 'valid', 'test']
+        if isinstance(self.filter_splits, str):
+            self.filter_splits = [self.filter_splits]
     
         # Internal shallow flag
         self._use_shallow = cfg.get('shallow', False)
@@ -221,15 +218,16 @@ class PathDataModule(LightningDataModule):
                 self.neg_paths[split] = json.load(open(neg_fn))
 
                 # Check if this split should be pre-scanned
-                if split in self.pre_scan_splits:
+                if split in self.filter_splits:
                     print(f"Pre-scan enabled for {split} split. Running full data validation...")
-                    self._pre_scan_all_data_points(split)
+                    self.filter_edges(split)
                 else:
                     print(f"Pre-scan not configured for {split} split. Skipping data validation.")
 
                 # Continue with the rest of setup...
                 feat_fp = os.path.join(self.storage_dir, f"{self.dataset}_features.pt")
-                if os.path.exists(feat_fp):
+                # if os.path.exists(feat_fp):
+                if False:
                     fm = torch.load(feat_fp, weights_only=False)
                     if isinstance(fm, dict):
                         first = next(iter(fm.values()))
@@ -298,18 +296,18 @@ class PathDataModule(LightningDataModule):
     def test_dataloader(self):
         return self._dataloader('test', False)
 
-    def _pre_scan_all_data_points(self, split):
+    def filter_edges(self, split):
         """
-        Pre-scan ALL data points to validate the entire dataset
+        Pre-scan ALL data points to validate the entire dataset, and filters out invalid edges.
         """
-        print(f"\n--- Pre-scanning ALL {split} data points ---")
+        print(f"\n--- Pre-scanning and filtering {split} data points ---")
         
-        total_edges = len(self.data[split])
+        initial_edge_count = len(self.data[split])
         edge_ids = self.data[split].index.astype(str).tolist()
         
-        print(f"Scanning {total_edges} edges in {split} split...")
+        print(f"Scanning {initial_edge_count} edges in {split} split...")
         
-        # Process edges sequentially with a simple for loop
+        valid_edge_ids = []
         results = []
         for eid in tqdm(edge_ids, desc="Scanning edges"):
             # Inline scanning logic (previously in scan_edge_worker)
@@ -340,36 +338,42 @@ class PathDataModule(LightningDataModule):
             # Check if edge is valid (has both positive and negative paths)
             if has_valid_pos and has_valid_neg:
                 result["valid"] = True
+                valid_edge_ids.append(eid)
                 
             results.append(result)
         
         # Aggregate results
-        valid_edges = sum(r["valid"] for r in results)
+        valid_edges_count = len(valid_edge_ids)
         missing_pos = sum(r["missing_pos"] for r in results)
         missing_neg = sum(r["missing_neg"] for r in results)
         empty_neg = sum(r["empty_neg"] for r in results)
         
         # Calculate statistics
-        valid_percent = (valid_edges / total_edges) * 100 if total_edges > 0 else 0
+        valid_percent = (valid_edges_count / initial_edge_count) * 100 if initial_edge_count > 0 else 0
         
         # Print summary
         print(f"\nPre-scan Results for {split}:")
-        print(f"  Total edges: {total_edges}")
-        print(f"  Valid edges (has pos & neg paths): {valid_edges} ({valid_percent:.1f}%)")
-        print(f"  Missing positive paths: {missing_pos} ({(missing_pos/total_edges)*100:.1f}%)")
-        print(f"  Missing negative paths: {missing_neg} ({(missing_neg/total_edges)*100:.1f}%)")
-        print(f"  Empty negative paths: {empty_neg} ({(empty_neg/total_edges)*100:.1f}%)")
+        print(f"  Total edges scanned: {initial_edge_count}")
+        print(f"  Valid edges (has pos & neg paths): {valid_edges_count} ({valid_percent:.1f}%)")
+        print(f"  Missing positive paths: {missing_pos} ({(missing_pos/initial_edge_count)*100:.1f}%)")
+        print(f"  Missing negative paths: {missing_neg} ({(missing_neg/initial_edge_count)*100:.1f}%)")
+        print(f"  Empty negative paths: {empty_neg} ({(empty_neg/initial_edge_count)*100:.1f}%)")
         
-        if valid_edges < total_edges:
+        if valid_edges_count < initial_edge_count:
             print("\n⚠️  WARNING: Some edges are missing required path data!")
-            print(f"  Only {valid_percent:.1f}% of edges have complete data.")
-            print("  This may cause issues during training.\n")
+            print(f"  Filtering {split} split to keep only {valid_edges_count} valid edges.")
+            
+            # Filter the data structures
+            valid_edge_ids_int = [int(eid) for eid in valid_edge_ids]
+            self.data[split] = self.data[split].loc[valid_edge_ids_int]
+            self.pos_paths[split] = {eid: self.pos_paths[split][eid] for eid in valid_edge_ids}
+            self.neg_paths[split] = {eid: self.neg_paths[split][eid] for eid in valid_edge_ids}
+            
+            print(f"  New edge count for {split}: {len(self.data[split])}")
         else:
-            print("\n✓ All edges have complete path data.\n")
+            print("\n✓ All edges have complete path data. No filtering needed.")
         
         print("--- Pre-scan complete ---\n")
-        
-        return valid_edges, total_edges
 
 
 if __name__ == '__main__':

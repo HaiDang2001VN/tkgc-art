@@ -161,12 +161,14 @@ class PathPredictor(LightningModule):
     def training_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
         
-        if len(meta) < 3:
-            print(f"len(meta) is {len(meta)} at {batch_idx} batch_idx")
+        if meta is None:
+            print(f"meta is None at {batch_idx} batch_idx")
             return None
         
         losses, ptr = [], 0
-        for num_paths, length, label in meta:
+        for info in meta:
+            if len(info) == 1:
+            num_paths, length, label = info
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             if neg.numel():
