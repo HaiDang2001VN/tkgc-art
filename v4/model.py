@@ -113,7 +113,7 @@ class PathPredictor(LightningModule):
         all_emb = []
         meta_info = []
         for sample in batch:
-            if sample is None:
+            if 'paths' not in sample or sample['paths'] is None:
                 meta_info.append(sample["label"])
                 continue
 
