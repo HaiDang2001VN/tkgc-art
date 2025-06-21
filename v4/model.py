@@ -168,6 +168,9 @@ class PathPredictor(LightningModule):
         losses, ptr = [], 0
         for info in meta:
             if len(info) == 1:
+                print(f"Skipping single label sample at {batch_idx} batch_idx")
+                continue
+            
             num_paths, length, label = info
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
