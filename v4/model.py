@@ -263,12 +263,9 @@ class PathPredictor(LightningModule):
                 continue
             
             for item in output['items']:
-                if 'length' not in item:
-                    ...
-                
                 # Add the single positive score and its length
                 scores.append(item['score'])
-                lengths.append(item['length'])
+                lengths.append(item.get('length', 0))
                 labels.append(item['label'])
                 has_neg.append(item['has_neg'])
         
