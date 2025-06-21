@@ -283,7 +283,7 @@ class PathPredictor(LightningModule):
         ratios = lengths.float() / max_hops
         
         # Apply adjustment to scores (no clamping)
-        if self.cfg.get('adjust_no_neg_paths_samples', True):
+        if self.hparams.get('adjust_no_neg_paths_samples', True):
             adjusted_scores = scores + (ratios * max_adjust)
         else:
             adjusted_scores = scores
@@ -349,6 +349,7 @@ def main():
         'dropout': cfg.get('dropout', 0.1),
         'max_hops': cfg.get('max_hops', 10),
         'max_adjust': cfg.get('max_adjust', 0.1),
+        'adjust_no_neg_paths_samples': cfg.get('adjust_no_neg_paths_samples', True),
     }
     
     # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
