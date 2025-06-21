@@ -282,7 +282,8 @@ class PathPredictor(LightningModule):
         max_adjust = self.hparams.get('max_adjust', 0.1)  # Default to 0.1 if not defined
         
         # Calculate adjustment ratio based on length/max_hops
-        ratios = lengths.float() / max_hops
+        min_length = lengths.min()
+        ratios = 1 - ((lengths.float() - min_length) / (max_hops - min_length + 1e-8))
         
         # Apply adjustment to scores (no clamping)
         if self.hparams.get('adjust_no_neg_paths_samples', True):

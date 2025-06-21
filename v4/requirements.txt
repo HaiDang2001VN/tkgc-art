@@ -3,3 +3,5 @@ lightning
 wandb
 git+https://github.com/HaiDang2001VN/ogb
 git+https://github.com/HaiDang2001VN/TGB
+matplotlib
+seaborn
