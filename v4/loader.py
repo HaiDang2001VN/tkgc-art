@@ -15,6 +15,39 @@ from tqdm import tqdm
 # Proxy for extracting shallow embeddings
 from embedding import KGEModelProxy
 
+# Define scan_edge_worker at module level for multiprocessing pickle support
+def scan_edge_worker(eid, pos_paths, neg_paths):
+    """Worker function for scanning edge validity"""
+    result = {
+        "valid": False,
+        "missing_pos": 0,
+        "missing_neg": 0,
+        "empty_neg": 0
+    }
+    
+    # Check positive path
+    has_valid_pos = False
+    if eid in pos_paths and pos_paths[eid].get('nodes'):
+        has_valid_pos = True
+    else:
+        result["missing_pos"] = 1
+    
+    # Check negative paths
+    has_valid_neg = False
+    if eid in neg_paths:
+        if neg_paths[eid]:  # Check if the list is not empty
+            has_valid_neg = True
+        else:
+            result["empty_neg"] = 1
+    else:
+        result["missing_neg"] = 1
+    
+    # Check if edge is valid (has both positive and negative paths)
+    if has_valid_pos and has_valid_neg:
+        result["valid"] = True
+        
+    return result
+
 # Custom collate that returns list of samples (avoids stacking variable-length tensors)
 
 
@@ -144,7 +177,7 @@ class PathDataModule(LightningDataModule):
         self.dataset = cfg['dataset']
         self.num_neg = cfg.get('num_neg', None)
         # Get num_threads for DataLoader num_workers
-        self.num_workers = cfg.get('num_threads', 0)
+        self.num_workers = cfg.get('num_threads', mp.cpu_count())
         # Update pre_scan to accept a list of split names
         self.pre_scan_splits = cfg.get('pre_scan', [])
         # Convert to list if a string was provided
@@ -309,45 +342,13 @@ class PathDataModule(LightningDataModule):
         
         print(f"Scanning {total_edges} edges in {split} split...")
         
-        # Define worker function for multiprocessing
-        def scan_edge(eid, pos_paths, neg_paths):
-            result = {
-                "valid": False,
-                "missing_pos": 0,
-                "missing_neg": 0, 
-                "empty_neg": 0
-            }
-            
-            # Check positive path
-            has_valid_pos = False
-            if eid in pos_paths and pos_paths[eid].get('nodes'):
-                has_valid_pos = True
-            else:
-                result["missing_pos"] = 1
-            
-            # Check negative paths
-            has_valid_neg = False
-            if eid in neg_paths:
-                if neg_paths[eid]:  # Check if the list is not empty
-                    has_valid_neg = True
-                else:
-                    result["empty_neg"] = 1
-            else:
-                result["missing_neg"] = 1
-            
-            # Check if edge is valid (has both positive and negative paths)
-            if has_valid_pos and has_valid_neg:
-                result["valid"] = True
-                
-            return result
-        
         # Number of processes to use (adjust based on system capabilities)
-        num_processes = min(mp.cpu_count(), 8)  # Use up to 8 processes or CPU count, whichever is less
+        num_processes = max(self.num_workers, 1)
         print(f"Using {num_processes} processes for parallel scanning")
         
         # Create partial function with fixed arguments
         scan_func = partial(
-            scan_edge, 
+            scan_edge_worker,  # Use the module-level function
             pos_paths=self.pos_paths[split], 
             neg_paths=self.neg_paths[split]
         )
