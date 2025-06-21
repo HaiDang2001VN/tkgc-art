@@ -204,6 +204,13 @@ class PathPredictor(LightningModule):
             
             num_paths, length, label = meta_info
             
+            if num_paths == 1:
+                batch_items.append({
+                    "score": 1,
+                    "label": label,  # Single label for this sample
+                })
+                continue
+            
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             
