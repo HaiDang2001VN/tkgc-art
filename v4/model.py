@@ -217,7 +217,7 @@ class PathPredictor(LightningModule):
                 mean_z_pos = z_pos.mean()
                 
                 # Convert mean z-score to percentile for positive sample
-                percentile_pos = torch.special.ndtr(mean_z_pos).item()
+                percentile_pos = 1 - torch.special.ndtr(mean_z_pos).item()
                 
                 # Calculate mean z-score for loss
                 losses.append(mean_z_pos if label else -mean_z_pos)
@@ -235,7 +235,7 @@ class PathPredictor(LightningModule):
             ptr += num_paths
         
         # Use negated z-scores for loss, similar to training_step
-        loss = -torch.stack(losses).mean() if losses else torch.tensor(0.0)
+        loss = torch.stack(losses).mean() if losses else torch.tensor(0.0)
         
         self.validation_step_outputs.append({'loss': loss, 'items': batch_items})
         return loss
