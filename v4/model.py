@@ -59,7 +59,8 @@ class PathPredictor(LightningModule):
         lp_norm: int = None,
         max_hops: int = 10,
         max_adjust: float = 0.1,
-        norm_fn=None
+        norm_fn=None,
+        adjust_no_neg_paths_samples=True,
     ):
         super().__init__()
         self.save_hyperparameters()
