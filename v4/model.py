@@ -267,7 +267,7 @@ class PathPredictor(LightningModule):
                 scores.append(item['score'])
                 lengths.append(item.get('length', 0))
                 labels.append(item['label'])
-                has_neg.append(item['has_neg'])
+                has_neg.append(item.get('has_neg', False))
         
         # Convert lists to tensors for evaluation
         scores = torch.tensor(scores)
