@@ -103,7 +103,7 @@ class EdgeDataset(Dataset):
         if self.kge_proxy is not None:
             embs_for_all_paths = [] # This will be a list of tensors
             # Get device of KGE proxy model for intermediate operations
-            device = self.kge_proxy.model.device
+            device = next(self.kge_proxy.model.parameters()).device
             
             for node_list_for_one_path in all_paths_nodes_only:
                 if not node_list_for_one_path:
@@ -266,7 +266,7 @@ class PathDataModule(LightningDataModule):
                         config = json.load(open(config_path))
                         self.kge_proxy[split] = KGEModelProxy(config, state_dict_path=state_dict_path)
                         self.kge_proxy[split].eval()
-                        print(f"Device for KGE model: {self.kge_proxy[split].model.device}")
+                        print(f"Device for KGE model: {next(self.kge_proxy[split].model.parameters()).device}")
 
                 print(f"Loaded {len(self.data[split])} edges for {split} split.")
         else:
