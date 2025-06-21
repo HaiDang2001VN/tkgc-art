@@ -15,5 +15,6 @@
   "store": "model",
   "save_text_embeddings": true,
   "shallow": true,
-  "pre_scan": ["train"]
+  "pre_scan": ["train"],
+  "adjust_no_neg_paths_samples": true
 }
