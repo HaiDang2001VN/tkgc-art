@@ -180,7 +180,7 @@ class PathPredictor(LightningModule):
                 losses.append(z.mean() if label else -z.mean())
             
             ptr += num_paths
-        loss = -torch.stack(losses).mean()
+        loss = torch.stack(losses).mean() # diff pos lower better so z_pos must be to left of z_neg
         
         self.log('train_loss', loss, on_step=True, prog_bar=True)
         
