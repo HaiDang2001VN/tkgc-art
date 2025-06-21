@@ -8,49 +8,13 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from lightning.pytorch import LightningDataModule
 from typing import Union
-import multiprocessing as mp
-from functools import partial
 from tqdm import tqdm
 
 # Proxy for extracting shallow embeddings
 from embedding import KGEModelProxy
 
-# Define scan_edge_worker at module level for multiprocessing pickle support
-def scan_edge_worker(eid, pos_paths, neg_paths):
-    """Worker function for scanning edge validity"""
-    result = {
-        "valid": False,
-        "missing_pos": 0,
-        "missing_neg": 0,
-        "empty_neg": 0
-    }
-    
-    # Check positive path
-    has_valid_pos = False
-    if eid in pos_paths and pos_paths[eid].get('nodes'):
-        has_valid_pos = True
-    else:
-        result["missing_pos"] = 1
-    
-    # Check negative paths
-    has_valid_neg = False
-    if eid in neg_paths:
-        if neg_paths[eid]:  # Check if the list is not empty
-            has_valid_neg = True
-        else:
-            result["empty_neg"] = 1
-    else:
-        result["missing_neg"] = 1
-    
-    # Check if edge is valid (has both positive and negative paths)
-    if has_valid_pos and has_valid_neg:
-        result["valid"] = True
-        
-    return result
 
-# Custom collate that returns list of samples (avoids stacking variable-length tensors)
-
-
+# Custom collate function remains unchanged
 def collate_to_list(batch: list[dict]) -> list[dict]:
     return batch
 
@@ -333,36 +297,48 @@ class PathDataModule(LightningDataModule):
 
     def _pre_scan_all_data_points(self, split):
         """
-        Pre-scan ALL data points in parallel to validate the entire dataset
+        Pre-scan ALL data points to validate the entire dataset
         """
-        print(f"\n--- Pre-scanning ALL {split} data points using multiprocessing ---")
+        print(f"\n--- Pre-scanning ALL {split} data points ---")
         
         total_edges = len(self.data[split])
         edge_ids = self.data[split].index.astype(str).tolist()
         
         print(f"Scanning {total_edges} edges in {split} split...")
         
-        # Number of processes to use (adjust based on system capabilities)
-        num_processes = max(self.num_workers, 1)
-        print(f"Using {num_processes} processes for parallel scanning")
-        
-        # Create partial function with fixed arguments
-        scan_func = partial(
-            scan_edge_worker,  # Use the module-level function
-            pos_paths=self.pos_paths[split], 
-            neg_paths=self.neg_paths[split]
-        )
-        
-        # Process edges in parallel
+        # Process edges sequentially with a simple for loop
         results = []
-        with mp.Pool(processes=num_processes) as pool:
-            # Use tqdm to show progress bar
-            for result in tqdm(
-                pool.imap(scan_func, edge_ids),
-                total=total_edges, 
-                desc="Scanning edges"
-            ):
-                results.append(result)
+        for eid in tqdm(edge_ids, desc="Scanning edges"):
+            # Inline scanning logic (previously in scan_edge_worker)
+            result = {
+                "valid": False,
+                "missing_pos": 0,
+                "missing_neg": 0,
+                "empty_neg": 0
+            }
+            
+            # Check positive path
+            has_valid_pos = False
+            if eid in self.pos_paths[split] and self.pos_paths[split][eid].get('nodes'):
+                has_valid_pos = True
+            else:
+                result["missing_pos"] = 1
+            
+            # Check negative paths
+            has_valid_neg = False
+            if eid in self.neg_paths[split]:
+                if self.neg_paths[split][eid]:  # Check if the list is not empty
+                    has_valid_neg = True
+                else:
+                    result["empty_neg"] = 1
+            else:
+                result["missing_neg"] = 1
+            
+            # Check if edge is valid (has both positive and negative paths)
+            if has_valid_pos and has_valid_neg:
+                result["valid"] = True
+                
+            results.append(result)
         
         # Aggregate results
         valid_edges = sum(r["valid"] for r in results)
