@@ -47,8 +47,12 @@ class EdgeDataset(Dataset):
         # Positive paths are expected to be lists of nodes already
         pos_nodes = self.pos_paths.get(str(eid), {}).get('nodes')
         
+        item = {}
+        # Create label tensor on CPU
+        item['label'] = torch.tensor(label, dtype=torch.long)  # CPU default
+        
         if pos_nodes is None: # If no positive path, skip this item
-            return None # DataLoader will filter this out if batch_sampler is not used or if collate handles None
+            return item # Still returns the label in order for later evaluation if needed
         
         # Negative paths from preprocess.cpp are interleaved: [node0, edge_type1, node1, ...]
         raw_neg_interleaved_paths = self.neg_paths.get(str(eid), [])
@@ -67,12 +71,10 @@ class EdgeDataset(Dataset):
         # e.g., [[pos_n1, pos_n2], [neg1_n1, neg1_n2, neg1_n3], [neg2_n1, neg2_n2]]
         all_paths_nodes_only = [pos_nodes] + negs_nodes_only
         
-        item = {}
+        
         # Store paths as a list of lists of integers. Tensor conversion (if needed) happens later,
         # possibly after padding in the model or a more sophisticated collate_fn.
         item['paths'] = all_paths_nodes_only
-        # Create label tensor on CPU
-        item['label'] = torch.tensor(label, dtype=torch.long)  # CPU default
         
         # if self.features_map is not None:
         #     feats_for_all_paths = [] # This will be a list of tensors
