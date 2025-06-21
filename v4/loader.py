@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from lightning.pytorch import LightningDataModule
 from typing import Union
+import multiprocessing as mp
 from tqdm import tqdm
 
 # Proxy for extracting shallow embeddings
