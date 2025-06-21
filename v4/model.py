@@ -114,7 +114,7 @@ class PathPredictor(LightningModule):
         meta_info = []
         for sample in batch:
             if 'paths' not in sample or sample['paths'] is None:
-                meta_info.append(sample["label"])
+                meta_info.append((sample["label"], ))
                 continue
 
             paths = sample['paths']
@@ -172,7 +172,7 @@ class PathPredictor(LightningModule):
                 mean, std = neg.mean(0), neg.std(0, unbiased=False)
                 z = (pos - mean)/(std+1e-8)
             else:
-                z = pos*0
+                z = pos * 0
             
             losses.append(z.mean() if label else -z.mean())
             ptr += num_paths
@@ -191,9 +191,7 @@ class PathPredictor(LightningModule):
         
         batch_items = []  # Store structured items for each sample
         losses = []
-        
-        # TODO: process the label stuff in the following loop as well as on_validation_epoch_end
-        
+                
         ptr = 0
         for meta_info in meta:
             if len(meta_info) == 1:
@@ -204,37 +202,31 @@ class PathPredictor(LightningModule):
                 batch_items.append(item)
                 continue
             
-            num_paths, length = meta_info
+            num_paths, length, label = meta_info
+            
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             
             if neg.numel():
                 mean, std = neg.mean(0), neg.std(0, unbiased=False)
                 z_pos = (pos - mean)/(std+1e-8)
-                z_neg = (neg - mean)/(std+1e-8)
-                
-                # Calculate mean z-score for loss and positive percentile
                 mean_z_pos = z_pos.mean()
-                losses.append(mean_z_pos)
                 
                 # Convert mean z-score to percentile for positive sample
                 percentile_pos = torch.special.ndtr(mean_z_pos).item()
-                
-                # Keep individual percentiles for negative samples
-                percentile_neg = torch.special.ndtr(z_neg).flatten().tolist()
             else:
-                z_pos = pos*0
+                z_pos = pos * 0
                 mean_z_pos = z_pos.mean()
-                losses.append(mean_z_pos)
                 percentile_pos = 0.5
-                percentile_neg = []
+                
+            # Calculate mean z-score for loss
+            losses.append(mean_z_pos if label else -mean_z_pos)
             
             # Create item with organized structure
             item = {
-                'pos_score': percentile_pos,  # Single percentile from mean z-score
-                'neg_scores': percentile_neg,  # List of individual percentiles
+                'score': percentile_pos,  # Single percentile from mean z-score
                 'length': length,  # Path length for this sample
-                'label': meta_info[-1]  # Label for this sample
+                'label': label  # Label for this sample
             }
             batch_items.append(item)
             ptr += num_paths
