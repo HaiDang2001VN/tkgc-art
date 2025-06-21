@@ -61,6 +61,7 @@ class PathPredictor(LightningModule):
         max_adjust: float = 0.1,
         norm_fn=None,
         adjust_no_neg_paths_samples=True,
+        lr=1e-4,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -152,11 +153,6 @@ class PathPredictor(LightningModule):
         pred_emb = self(src_emb)
         diff = self.norm_fn(pred_emb - tgt_emb, dim=-1)
         return diff, meta
-
-    def on_validation_epoch_start(self):
-        self.pos_scores = []
-        self.neg_scores = []
-        self.path_lengths = []  # Track path lengths
 
     def training_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
@@ -305,7 +301,7 @@ class PathPredictor(LightningModule):
         self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-4)
+        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
 
 
 def main():
@@ -356,6 +352,7 @@ def main():
         'max_hops': cfg.get('max_hops', 10),
         'max_adjust': cfg.get('max_adjust', 0.1),
         'adjust_no_neg_paths_samples': cfg.get('adjust_no_neg_paths_samples', True),
+        'lr': cfg.get('lr', 1e-4),
     }
     
     # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
