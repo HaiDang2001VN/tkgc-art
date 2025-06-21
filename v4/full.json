@@ -16,5 +16,7 @@
   "save_text_embeddings": true,
   "shallow": true,
   "pre_scan": ["train"],
-  "adjust_no_neg_paths_samples": true
+  "adjust_no_neg_paths_samples": true,
+  "max_adjust": 0.5,
+  "embedding": "all"
 }

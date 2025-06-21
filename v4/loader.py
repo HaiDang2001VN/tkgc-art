@@ -150,6 +150,7 @@ class PathDataModule(LightningDataModule):
         # Convert to list if a string was provided
         if isinstance(self.filter_splits, str):
             self.filter_splits = [self.filter_splits]
+        self.embedding_used = cfg.get('embedding', None)
     
         # Internal shallow flag
         self._use_shallow = cfg.get('shallow', False)
@@ -254,7 +255,7 @@ class PathDataModule(LightningDataModule):
                     embedding_config = json.load(open(embedding_config_path))
                     model_name = embedding_config.get('model_name', 'transe')
 
-                    config_prefix = f"{model_name}_{self.dataset}_{split}"
+                    config_prefix = f"{model_name}_{self.dataset}_{split if self.embedding_used is None else self.embedding_used}"
                     config_name = f"{config_prefix}{config_suffix}"
                     config_path = os.path.join(self.storage_dir, config_name)
 
