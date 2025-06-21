@@ -137,6 +137,20 @@ class KGEModelProxy(nn.Module):
         if device is None:
             device = torch.device(
                 'cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Infer num_nodes from the data if not provided in config
+        if 'num_nodes' not in cfg:
+            # Find max node ID from both head and tail columns
+            max_node_id = int(train_triples[:, [0, 2]].max().item())
+            
+            # If validation triples are available, check there too
+            if val_triples is not None:
+                max_node_id = max(max_node_id, int(val_triples[:, [0, 2]].max().item()))
+            
+            # Number of nodes is max_id + 1 (since IDs are zero-indexed)
+            num_nodes = max_node_id + 1
+            cfg['num_nodes'] = num_nodes
+            print(f"Auto-inferred number of nodes: {num_nodes}")
 
         batch_size = cfg.get('batch_size', 1024)
         train_ds = TensorDataset(
