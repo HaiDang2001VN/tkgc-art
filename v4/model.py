@@ -63,6 +63,7 @@ class PathPredictor(LightningModule):
         adjust_no_neg_paths_samples=True,
         lr=1e-4,
         scale_loss=False,
+        chi2=False,
         **kwargs  # Additional hyperparameters
     ):
         super().__init__()
@@ -224,8 +225,20 @@ class PathPredictor(LightningModule):
                 z_pos = (pos - mean)/(std+1e-8)
                 mean_z_pos = z_pos.mean()
                 
-                # Convert mean z-score to percentile for positive sample
-                percentile_pos = 1 - torch.special.ndtr(mean_z_pos).item()
+                if self.hparams.chi2:
+                    # Chi-squared statistic from z-scores
+                    chi2_stat = torch.sum(z_pos**2)
+                    
+                    # Degrees of freedom = hidden_dim of the model
+                    df = self.hparams.hidden_dim
+                    
+                    # CDF of chi-squared distribution
+                    chi2_dist = torch.distributions.chi2.Chi2(df)
+                    cdf_val = chi2_dist.cdf(chi2_stat)
+                    percentile_pos = 1 - cdf_val.item()
+                else:
+                    # Convert mean z-score to percentile for positive sample using normal CDF
+                    percentile_pos = 1 - torch.special.ndtr(mean_z_pos).item()
                 
                 # Calculate mean z-score for loss
                 loss = torch.asinh(mean_z_pos) if self.scale_loss else mean_z_pos
@@ -380,6 +393,7 @@ def main():
         'adjust_no_neg_paths_samples': cfg.get('adjust_no_neg_paths_samples', True),
         'lr': cfg.get('lr', 1e-4),
         'scale_loss': cfg.get('scale_loss', False),
+        'chi2': cfg.get('chi2', False),
     }
     
     # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
