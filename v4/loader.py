@@ -151,6 +151,7 @@ class PathDataModule(LightningDataModule):
         if isinstance(self.filter_splits, str):
             self.filter_splits = [self.filter_splits]
         self.embedding_used = cfg.get('embedding', None)
+        self.test_time = False  # Flag to indicate if this is test time
     
         # Internal shallow flag
         self._use_shallow = cfg.get('shallow', False)
@@ -290,10 +291,16 @@ class PathDataModule(LightningDataModule):
         )
 
     def train_dataloader(self):
-        return self._dataloader('train', self.shuffle)
+        if not self.test_time:
+            return self._dataloader('train', self.shuffle)
+        else:
+            return self._dataloader('valid', self.shuffle)
 
     def val_dataloader(self):
-        return self._dataloader('valid', False)
+        if not self.test_time:
+            return self._dataloader('valid', False)
+        else:
+            return self._dataloader('test', False)
 
     def test_dataloader(self):
         return self._dataloader('test', False)

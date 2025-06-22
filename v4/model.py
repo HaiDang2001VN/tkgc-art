@@ -93,8 +93,9 @@ class PathPredictor(LightningModule):
         self.output_proj = nn.Linear(
             self.hparams.hidden_dim, self.hparams.emb_dim)
         
-        # valid step outputs
+        # valid and test step outputs
         self.validation_step_outputs = []
+        self.test_step_outputs = []
 
     def forward(self, src_emb: torch.Tensor) -> torch.Tensor:
         h = self.input_proj(src_emb)
@@ -182,12 +183,12 @@ class PathPredictor(LightningModule):
         
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def _evaluation_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
         
         if meta is None:
             print(f"meta is None at {batch_idx} batch_idx")
-            return None
+            return None, None
         
         batch_items = []  # Store structured items for each sample
         losses = []
@@ -198,6 +199,8 @@ class PathPredictor(LightningModule):
                 item = {
                     "score": 0,
                     "label": meta_info[0],  # Single label for this sample
+                    "length": 0,
+                    "has_neg": False
                 }
                 batch_items.append(item)
                 continue
@@ -218,7 +221,7 @@ class PathPredictor(LightningModule):
                 # Calculate mean z-score for loss
                 losses.append(mean_z_pos if label else -mean_z_pos)
             else:
-                percentile_pos = 1
+                percentile_pos = 1.0
 
             # Create item with organized structure
             item = {
@@ -231,75 +234,87 @@ class PathPredictor(LightningModule):
             ptr += num_paths
         
         # Use negated z-scores for loss, similar to training_step
-        loss = torch.stack(losses).mean() if losses else torch.tensor(0.0)
+        loss = torch.stack(losses).mean() if losses else torch.tensor(0.0, device=self.device)
         
-        self.validation_step_outputs.append({'loss': loss, 'items': batch_items})
+        return loss, batch_items
+
+    def validation_step(self, batch, batch_idx):
+        loss, batch_items = self._evaluation_step(batch, batch_idx)
+        if loss is not None:
+            self.validation_step_outputs.append({'loss': loss, 'items': batch_items})
         return loss
 
-    def on_validation_epoch_end(self):        
-        # Calculate epoch-level validation loss
-        val_losses = []
-        for output in self.validation_step_outputs:
-            if output is None or 'loss' not in output:
-                continue
-            val_losses.append(output['loss'])
+    def test_step(self, batch, batch_idx):
+        loss, batch_items = self._evaluation_step(batch, batch_idx)
+        if loss is not None:
+            self.test_step_outputs.append({'loss': loss, 'items': batch_items})
+        return loss
+
+    def _on_evaluation_epoch_end(self, outputs, stage):
+        if not outputs:
+            print(f"Warning: No outputs found in {stage} step. Skipping {stage} epoch end.")
+            return
+
+        # Calculate epoch-level loss
+        epoch_losses = []
+        for output in outputs:
+            if output and 'loss' in output and output['loss'] is not None:
+                epoch_losses.append(output['loss'])
         
-        # Compute and log mean validation loss over the epoch
-        if val_losses:
-            mean_val_loss = torch.stack(val_losses).mean()
-            # This is the ONLY place val_loss is logged
-            self.log('val_loss', mean_val_loss, prog_bar=True)
-            print(f"Validation loss: {mean_val_loss.item()}")
+        if epoch_losses:
+            mean_epoch_loss = torch.stack(epoch_losses).mean()
+            self.log(f'{stage}_loss', mean_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
+            print(f"{stage.capitalize()} loss: {mean_epoch_loss.item()}")
         else:
-            # If no valid outputs, log a warning
-            print("Warning: No valid outputs found in validation step. Skipping validation loss logging.")
+            print(f"Warning: No valid losses found in {stage} step. Skipping {stage} loss logging.")
         
-        # Extract and organize values
-        scores = []
-        lengths = []
-        labels = []
-        has_neg = []
+        # Extract and organize values for evaluation
+        scores, lengths, labels, has_neg = [], [], [], []
         
-        for output in self.validation_step_outputs:
-            if output is None:
-                continue
-            
-            for item in output['items']:
-                # Add the single positive score and its length
-                scores.append(item['score'])
-                lengths.append(item.get('length', 0))
-                labels.append(item['label'])
-                has_neg.append(item.get('has_neg', False))
+        for output in outputs:
+            if output and 'items' in output:
+                for item in output['items']:
+                    scores.append(item['score'])
+                    lengths.append(item.get('length', 0))
+                    labels.append(item['label'])
+                    has_neg.append(item.get('has_neg', False))
         
-        # Convert lists to tensors for evaluation
+        if not scores:
+            print(f"Warning: No items with scores found in {stage} outputs. Skipping evaluation.")
+            return
+
         scores = torch.tensor(scores)
         lengths = torch.tensor(lengths)
         labels = torch.tensor(labels)
         has_neg = torch.tensor(has_neg)
         
-        # Apply score adjustment based on path length
         max_hops = self.hparams.max_hops
-        max_adjust = self.hparams.get('max_adjust', 0.1)  # Default to 0.1 if not defined
+        max_adjust = self.hparams.get('max_adjust', 1.0)
         
-        # Calculate adjustment ratio based on length/max_hops
-        min_length = lengths.min()
-        ratios = 1 - ((lengths.float() - min_length) / (max_hops - min_length + 1e-8))
+        min_len = lengths.min() if lengths.numel() > 0 else 0
+        ratios = 1 - ((lengths.float() - min_len) / (max_hops - min_len + 1e-8))
         
-        # Apply adjustment to scores (no clamping)
         if self.hparams.get('adjust_no_neg_paths_samples', True):
             adjusted_scores = scores + (ratios * max_adjust)
         else:
-            adjusted_scores = scores
-            adjusted_scores[has_neg] = scores[has_neg] + (ratios[has_neg] * max_adjust[has_neg])
+            adjusted_scores = scores.clone()
+            if has_neg.any():
+                adjustment = ratios[has_neg] * max_adjust
+                adjusted_scores[has_neg] = scores[has_neg] + adjustment
         
-        # Perform evaluation using the adjusted scores (without passing lengths)
         dataset_name = self.trainer.datamodule.dataset
         results = evaluate(dataset_name, adjusted_scores[labels == 1], adjusted_scores[labels == 0])
         
         for k, v in results.items():
-            self.log(k, v)
+            self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
 
+    def on_validation_epoch_end(self):
+        self._on_evaluation_epoch_end(self.validation_step_outputs, 'val')
         self.validation_step_outputs.clear()
+
+    def on_test_epoch_end(self):
+        self._on_evaluation_epoch_end(self.test_step_outputs, 'test')
+        self.test_step_outputs.clear()
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
@@ -398,6 +413,18 @@ def main():
     ckpt = ModelCheckpoint(monitor='val_loss', save_top_k=1, mode='min')
     trainer = Trainer(max_epochs=max_epochs, callbacks=[ckpt], logger=logger)
     trainer.fit(model, dm)
+
+    # Run the test stage after training is complete, using the best checkpoint
+    print("\n--- Running Test Stage ---")
+    trainer.test(model, datamodule=dm, ckpt_path='best')
+    
+    # Run the test-time evaluation
+    print("\n--- Running Test-Time Evaluation ---")
+    test_epochs = cfg.get('test_time', 0)
+    if test_epochs > 0:
+        dm.test_time = True
+        test_trainer = Trainer(max_epochs=test_epochs, logger=logger, callbacks=[ckpt])
+        test_trainer.fit(model, dm)
 
 
 if __name__ == '__main__':
