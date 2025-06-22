@@ -62,6 +62,8 @@ class PathPredictor(LightningModule):
         norm_fn=None,
         adjust_no_neg_paths_samples=True,
         lr=1e-4,
+        scale_loss=False,
+        **kwargs  # Additional hyperparameters
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -74,6 +76,8 @@ class PathPredictor(LightningModule):
         else:
             # Fallback to L2 norm if neither is provided
             self.norm_fn = lambda tensor, dim: torch.norm(tensor, p=2, dim=dim)
+            
+        self.scale_loss = scale_loss
             
         # project input embeddings to transformer hidden size and back
         self.input_proj = nn.Linear(
@@ -153,6 +157,7 @@ class PathPredictor(LightningModule):
         
         pred_emb = self(src_emb)
         diff = self.norm_fn(pred_emb - tgt_emb, dim=-1)
+        
         return diff, meta
 
     def training_step(self, batch, batch_idx):
@@ -174,7 +179,11 @@ class PathPredictor(LightningModule):
             if neg.numel():
                 mean, std = neg.mean(0), neg.std(0, unbiased=False)
                 z = (pos - mean)/(std+1e-8)
-                losses.append(z.mean() if label else -z.mean())
+                mean_z = z.mean() if label else -z.mean()
+
+                # Apply arcsinh scaling if specified
+                loss = torch.asinh(mean_z) if self.scale_loss else mean_z
+                losses.append(loss)
             
             ptr += num_paths
         loss = torch.stack(losses).mean() # diff pos lower better so z_pos must be to left of z_neg
@@ -219,7 +228,8 @@ class PathPredictor(LightningModule):
                 percentile_pos = 1 - torch.special.ndtr(mean_z_pos).item()
                 
                 # Calculate mean z-score for loss
-                losses.append(mean_z_pos if label else -mean_z_pos)
+                loss = torch.asinh(mean_z_pos) if self.scale_loss else mean_z_pos
+                losses.append(loss if label else -loss)
             else:
                 percentile_pos = 1.0
 
@@ -369,6 +379,7 @@ def main():
         'max_adjust': cfg.get('max_adjust', 1.0),
         'adjust_no_neg_paths_samples': cfg.get('adjust_no_neg_paths_samples', True),
         'lr': cfg.get('lr', 1e-4),
+        'scale_loss': cfg.get('scale_loss', False),
     }
     
     # If lp_norm is in config, use it, otherwise use norm_fn from embedding config

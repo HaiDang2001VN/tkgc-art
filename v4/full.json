@@ -20,5 +20,6 @@
   "max_adjust": 1.0,
   "embedding": "all",
   "test_time": 1,
-  "num_ckpt": 2
+  "num_ckpt": 2,
+  "scale_loss": true
 }
