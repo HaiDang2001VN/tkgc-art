@@ -366,7 +366,7 @@ def main():
         'dim_feedforward': cfg.get('dim_feedforward', 512),
         'dropout': cfg.get('dropout', 0.1),
         'max_hops': cfg.get('max_hops', 10),
-        'max_adjust': cfg.get('max_adjust', 0.1),
+        'max_adjust': cfg.get('max_adjust', 1.0),
         'adjust_no_neg_paths_samples': cfg.get('adjust_no_neg_paths_samples', True),
         'lr': cfg.get('lr', 1e-4),
     }
@@ -410,7 +410,7 @@ def main():
         version=None  # Auto-increment version
     )
     
-    ckpt = ModelCheckpoint(monitor='val_loss', save_top_k=1, mode='min')
+    ckpt = ModelCheckpoint(monitor='val_loss', save_top_k=cfg.get('num_ckpt', 1), dirpath=log_dir, mode='min')
     trainer = Trainer(max_epochs=max_epochs, callbacks=[ckpt], logger=logger)
     trainer.fit(model, dm)
 

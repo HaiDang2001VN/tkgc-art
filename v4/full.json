@@ -19,5 +19,6 @@
   "adjust_no_neg_paths_samples": true,
   "max_adjust": 1.0,
   "embedding": "all",
-  "test_time": 1
+  "test_time": 1,
+  "num_ckpt": 2
 }
