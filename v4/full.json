@@ -19,7 +19,7 @@
   "adjust_no_neg_paths_samples": true,
   "max_adjust": 5.0,
   "embedding": "all",
-  "test_time": 1,
+  "test_time": 2,
   "num_ckpt": 2,
   "scale_loss": true,
   "chi2": false
