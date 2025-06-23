@@ -265,6 +265,7 @@ std::vector<Path> beam_search_for_edge(
     // Determine whether to exclude direct neighbors based on hop count
     // If pattern has >= 2 steps (hops), then exclude direct neighbors at the end
     bool exclude_direct_neighbors = (max_depth >= 2);
+    bool search_completed_successfully = true; // Flag to track if search finished
 
     for (int depth = 0; depth < max_depth; ++depth)
     {
@@ -336,7 +337,10 @@ std::vector<Path> beam_search_for_edge(
         }
 
         if (scored_candidates.empty())
+        {
+            search_completed_successfully = false;
             break;
+        }
 
         // Sort by score (descending) and keep top beam_width candidates
         std::sort(scored_candidates.begin(), scored_candidates.end(),
@@ -354,6 +358,12 @@ std::vector<Path> beam_search_for_edge(
         {
             current_beam.push_back(scored_path.second);
         }
+    }
+
+    // If the search was disrupted and did not complete, return an empty vector.
+    if (!search_completed_successfully)
+    {
+        current_beam.clear();
     }
 
     return current_beam;
