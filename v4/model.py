@@ -117,19 +117,18 @@ class PathPredictor(LightningModule):
         pred_emb = self.output_proj(h)
         return pred_emb
 
-    def _prepare_batch(self, batch: list[dict]):
+    def _predict(self, batch: list[dict]):
+        # This method combines the logic of _prepare_batch and the original _predict
         all_emb = []
         meta_info = []
         for sample in batch:
-            if 'paths' not in sample or sample['paths'] is None:
-                meta_info.append((sample["label"], ))
+            if 'paths' not in sample or not sample['paths']:
+                meta_info.append((sample["label"],))
                 continue
 
             paths = sample['paths']
             num_paths = len(paths)
             max_len = max(len(p) for p in paths) if num_paths else 0
-            # print(sample.keys())
-            # raise ValueError("Debugging paths: " + str(paths))
             
             if 'shallow_emb' in sample:
                 meta_info.append((num_paths, max_len - 1, sample["label"]))
@@ -139,42 +138,38 @@ class PathPredictor(LightningModule):
                         feat = sample['features'][idx]
                         emb = torch.cat([emb, feat], dim=-1)
                     all_emb.append(emb)
-                
-        if len(all_emb) == 0:
-            return [], [], meta_info
+        
+        if not all_emb:
+            # No paths found in the batch, return None for diff but keep meta_info
+            return None, meta_info
 
         src_seq = [e[:-1] for e in all_emb]
         tgt_seq = [e[1:] for e in all_emb]
-        src_emb = pad_sequence(src_seq, batch_first=True,
-                               padding_value=0.0, padding_side="right").detach()
-        tgt_emb = pad_sequence(tgt_seq, batch_first=True,
-                               padding_value=0.0, padding_side="right").detach()
-        return src_emb, tgt_emb, meta_info
+        src_emb = pad_sequence(src_seq, batch_first=True, padding_value=0.0, padding_side="right").detach()
+        tgt_emb = pad_sequence(tgt_seq, batch_first=True, padding_value=0.0, padding_side="right").detach()
 
-    def _predict(self, batch: list[dict]):
-        src_emb, tgt_emb, meta = self._prepare_batch(batch)
-        if len(meta) == 0:
-            return None, None
+        try:
+            pred_emb = self(src_emb)
+            diff = self.norm_fn(pred_emb - tgt_emb, dim=-1)
+        except TypeError as e:
+            print(f"Error during prediction: {e} with src_emb: {type(src_emb)}, tgt_emb: {type(tgt_emb)}")
+            print(f"src_emb shape: {len(src_emb)}, tgt_emb shape: {len(tgt_emb)}")
+            diff = None
+            meta_info = None
         
-        pred_emb = self(src_emb)
-        diff = self.norm_fn(pred_emb - tgt_emb, dim=-1)
-        
-        return diff, meta
+        return diff, meta_info
 
     def training_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
         
-        if meta is None:
-            print(f"meta is None at {batch_idx} batch_idx")
-            return None
-        
         losses, ptr = [], 0
         for info in meta:
             if len(info) == 1:
-                print(f"Skipping single label sample at {batch_idx} batch_idx")
+                # This sample has no paths, skip loss calculation
                 continue
             
             num_paths, length, label = info
+            # This part of the loop is only reachable if diff is not None
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             if neg.numel():
@@ -187,7 +182,12 @@ class PathPredictor(LightningModule):
                 losses.append(loss)
             
             ptr += num_paths
-        loss = torch.stack(losses).mean() # diff pos lower better so z_pos must be to left of z_neg
+        
+        if not losses:
+            # No loss was computed for this batch (e.g., no paths or no negative samples)
+            return None
+
+        loss = torch.stack(losses).mean()
         
         self.log('train_loss', loss, on_step=True, prog_bar=True)
         
@@ -195,10 +195,6 @@ class PathPredictor(LightningModule):
 
     def _evaluation_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
-        
-        if meta is None:
-            print(f"meta is None at {batch_idx} batch_idx")
-            return None, None
         
         batch_items = []  # Store structured items for each sample
         losses = []
