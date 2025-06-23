@@ -22,5 +22,6 @@
   "test_time": 2,
   "num_ckpt": 2,
   "scale_loss": true,
-  "chi2": false
+  "chi2": false,
+  "lr": 0.005
 }
