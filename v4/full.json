@@ -17,10 +17,10 @@
   "shallow": true,
   "pre_scan": ["train"],
   "adjust_no_neg_paths_samples": true,
-  "max_adjust": 1.0,
+  "max_adjust": 5.0,
   "embedding": "all",
   "test_time": 1,
   "num_ckpt": 2,
-  "scale_loss": false,
+  "scale_loss": true,
   "chi2": false
 }
