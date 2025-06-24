@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import CSVLogger
+from pytorch_lightning.loggers import CSVLogger, WandbLogger
 import torch.multiprocessing as mp
 
 # Evaluation utility
@@ -424,13 +424,15 @@ def main():
     print(f"Log directory: {log_dir}")
     os.makedirs(log_dir, exist_ok=True)
     
-    # Configure CSV logger
-    logger = CSVLogger(
+    # Configure Wandb logger
+    logger = WandbLogger(
+        name=f"{embedding_model}_{dataset_name}",
         save_dir=log_dir,
-        name="lightning_logs",
-        version=None  # Auto-increment version
+        project=cfg.get("wandb_project", "thesis-graph"),
+        entity=cfg.get("wandb_entity", "path-predictor"),
+        log_model=True
     )
-    
+
     ckpt = ModelCheckpoint(monitor='val_loss', save_top_k=cfg.get('num_ckpt', 1), dirpath=log_dir, mode='min')
     trainer = Trainer(max_epochs=max_epochs, callbacks=[ckpt], logger=logger)
     trainer.fit(model, dm)

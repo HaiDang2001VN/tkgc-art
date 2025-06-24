@@ -23,5 +23,7 @@
   "num_ckpt": 2,
   "scale_loss": true,
   "chi2": false,
-  "lr": 0.005
+  "lr": 0.005,
+  "wandb_project": "thesis-graph",
+  "wandb_entity": "path-predictor",
 }
