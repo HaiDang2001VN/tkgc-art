@@ -486,7 +486,7 @@ def main():
         name=f"{embedding_model}_{dataset_name}",
         save_dir=log_dir,
         project=cfg.get("wandb_project", "thesis-graph"),
-        entity=cfg.get("wandb_entity", "path-predictor"),
+        entity=cfg.get("wandb_entity", None),
         log_model=True
     )
 

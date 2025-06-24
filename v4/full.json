@@ -24,6 +24,5 @@
   "scale_loss": true,
   "chi2": false,
   "lr": 0.001,
-  "wandb_project": "thesis-graph",
-  "wandb_entity": "path-predictor"
+  "wandb_project": "thesis-graph"
 }
