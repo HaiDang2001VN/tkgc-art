@@ -146,7 +146,7 @@ class PathDataModule(LightningDataModule):
         # --- Adjust num_threads and batch_size if set to 'auto' ---
         num_threads = cfg.get('num_threads', mp.cpu_count())
         if isinstance(num_threads, str) and num_threads.lower() == 'auto':
-            num_threads = max(1, mp.cpu_count() - 2)
+            num_threads = max(1, mp.cpu_count() - 4)
         self.num_workers = num_threads
 
         if isinstance(batch_size, str) and batch_size.lower() == 'auto':
