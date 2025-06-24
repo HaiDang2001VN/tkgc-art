@@ -204,6 +204,7 @@ class PathPredictor(LightningModule):
             if len(meta_info) == 1:
                 item = {
                     "score": 0,
+                    "distance": None,
                     "label": meta_info[0],  # Single label for this sample
                     "length": 0,
                     "has_neg": False
@@ -245,6 +246,7 @@ class PathPredictor(LightningModule):
             # Create item with organized structure
             item = {
                 'score': percentile_pos,  # Single percentile from mean z-score
+                'distance': pos.detach().cpu().numpy(),  # Distance for positive sample
                 'length': length,  # Path length for this sample
                 'label': label,  # Label for this sample
                 'has_neg': neg.numel() > 0
@@ -275,20 +277,42 @@ class PathPredictor(LightningModule):
             return
 
         # Calculate epoch-level loss
-        epoch_losses = []
+        pos_losses = []
+        neg_losses = []
         for output in outputs:
             if output and 'loss' in output and output['loss'] is not None:
-                epoch_losses.append(output['loss'])
+                if output['label'] == 1:
+                    pos_losses.append(output['loss'])
+                else:
+                    neg_losses.append(output['loss'])
         
-        if epoch_losses:
-            mean_epoch_loss = torch.stack(epoch_losses).mean()
+        if pos_losses:
+            pos_epoch_loss = torch.stack(pos_losses).mean()
+            self.log(f'{stage}_pos_loss', pos_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
+            print(f"{stage.capitalize()} positive loss: {pos_epoch_loss.item()}")
+        else:
+            pos_epoch_loss = torch.tensor(0.0, device=self.device)
+            self.log(f'{stage}_pos_loss', pos_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
+            print(f"Warning: No positive losses found in {stage} step. Skipping {stage} positive loss logging.")
+        
+        if neg_losses:
+            neg_epoch_loss = torch.stack(neg_losses).mean()
+            self.log(f'{stage}_neg_loss', neg_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
+            print(f"{stage.capitalize()} negative loss: {neg_epoch_loss.item()}")
+        else:
+            neg_epoch_loss = torch.tensor(0.0, device=self.device)
+            self.log(f'{stage}_neg_loss', neg_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
+            print(f"Warning: No negative losses found in {stage} step. Skipping {stage} negative loss logging.")
+            
+        if pos_losses or neg_losses:
+            mean_epoch_loss = pos_epoch_loss + neg_epoch_loss
             self.log(f'{stage}_loss', mean_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
             print(f"{stage.capitalize()} loss: {mean_epoch_loss.item()}")
         else:
             print(f"Warning: No valid losses found in {stage} step. Skipping {stage} loss logging.")
         
         # Extract and organize values for evaluation
-        scores, lengths, labels, has_neg = [], [], [], []
+        scores, lengths, labels, has_neg, distances = [], [], [], [], []
         
         for output in outputs:
             if output and 'items' in output:
@@ -297,6 +321,7 @@ class PathPredictor(LightningModule):
                     lengths.append(item.get('length', 0))
                     labels.append(item['label'])
                     has_neg.append(item.get('has_neg', False))
+                    distances.append(item.get('distance', None))
         
         if not scores:
             print(f"Warning: No items with scores found in {stage} outputs. Skipping evaluation.")
@@ -326,6 +351,38 @@ class PathPredictor(LightningModule):
         
         for k, v in results.items():
             self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
+
+        # --- Export as JSON: a list of dicts, one per item ---
+        try:
+            epoch = self.trainer.current_epoch
+        except Exception:
+            epoch = "unknown"
+        log_dir = getattr(self.trainer.logger, "save_dir", "logs")
+        if hasattr(self.trainer.logger, "name"):
+            log_dir = os.path.join(log_dir, self.trainer.logger.name)
+        if hasattr(self.trainer.logger, "version"):
+            log_dir = os.path.join(log_dir, str(self.trainer.logger.version))
+        os.makedirs(log_dir, exist_ok=True)
+        # Determine prefix: "train" if not test_time, "test" if test_time
+        test_prefix = "test" if getattr(self.trainer.datamodule, "test_time", False) else "train"
+        export_path = os.path.join(log_dir, f"{test_prefix}_{stage}_{epoch}_raw.json")
+
+        # Prepare the list of dicts for export
+        export_items = []
+        for i in range(len(scores)):
+            export_items.append({
+                "score": float(scores[i]),
+                "length": int(lengths[i]),
+                "label": int(labels[i]),
+                "has_neg": bool(has_neg[i]),
+                "distance": (
+                    distances[i].tolist() if hasattr(distances[i], "tolist") else distances[i]
+                ),
+            })
+
+        with open(export_path, "w") as f:
+            json.dump(export_items, f, indent=2)
+        print(f"Exported raw evaluation items to {export_path}")
 
     def on_validation_epoch_end(self):
         self._on_evaluation_epoch_end(self.validation_step_outputs, 'val')
