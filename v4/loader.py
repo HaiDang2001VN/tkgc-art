@@ -10,6 +10,7 @@ from lightning.pytorch import LightningDataModule
 from typing import Union
 import multiprocessing as mp
 from tqdm import tqdm
+import requests  # Add this import at the top if not present
 
 # Proxy for extracting shallow embeddings
 from embedding import KGEModelProxy
@@ -143,14 +144,40 @@ class PathDataModule(LightningDataModule):
         self.dataset = cfg['dataset']
         self.num_neg = cfg.get('num_neg', None)
 
-        # --- Adjust num_threads and batch_size if set to 'auto' ---
+        # --- Adjust num_threads and batch_size if set to 'auto' or 'vast' ---
         num_threads = cfg.get('num_threads', mp.cpu_count())
-        if isinstance(num_threads, str) and num_threads.lower() == 'auto':
-            num_threads = max(1, mp.cpu_count() - 4)
-        self.num_workers = num_threads
+        batch_size_cfg = batch_size
 
-        if isinstance(batch_size, str) and batch_size.lower() == 'auto':
-            batch_size = num_threads
+        if isinstance(num_threads, str):
+            if num_threads.lower() == 'auto':
+                num_threads = max(1, mp.cpu_count() - 4)
+            elif num_threads.lower() == 'vast':
+                cid = os.getenv("CONTAINER_ID")
+                key = os.getenv("CONTAINER_API_KEY")
+                assert cid and key, "Not running on a Vast.ai container!"
+                resp = requests.get(
+                    f"https://console.vast.ai/api/v0/instances/{cid}/",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "accept": "application/json"
+                    },
+                    timeout=10,
+                )
+                info = resp.json()
+                num_threads = int(info['instances']["cpu_cores_effective"])
+                print("Effective vCPUs (Vast.ai):", num_threads)
+
+        if isinstance(batch_size_cfg, str):
+            if batch_size_cfg.lower() == 'auto':
+                batch_size = num_threads
+            elif batch_size_cfg.lower() == 'vast':
+                batch_size = num_threads
+            else:
+                batch_size = int(batch_size_cfg)
+        else:
+            batch_size = batch_size_cfg
+
+        self.num_workers = num_threads
         self.batch_size = batch_size
 
         # Update pre_scan to accept a list of split names
