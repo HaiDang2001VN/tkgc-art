@@ -136,18 +136,25 @@ class PathDataModule(LightningDataModule):
     ):
         super().__init__()
         self.config_path = config_path
-        self.batch_size = batch_size
         self.shuffle = shuffle
         cfg = json.load(open(config_path))
         self.cfg = cfg
         self.storage_dir = cfg.get('storage_dir', '.')
         self.dataset = cfg['dataset']
         self.num_neg = cfg.get('num_neg', None)
-        # Get num_threads for DataLoader num_workers
-        self.num_workers = cfg.get('num_threads', mp.cpu_count())
+
+        # --- Adjust num_threads and batch_size if set to 'auto' ---
+        num_threads = cfg.get('num_threads', mp.cpu_count())
+        if isinstance(num_threads, str) and num_threads.lower() == 'auto':
+            num_threads = max(1, mp.cpu_count() - 2)
+        self.num_workers = num_threads
+
+        if isinstance(batch_size, str) and batch_size.lower() == 'auto':
+            batch_size = num_threads
+        self.batch_size = batch_size
+
         # Update pre_scan to accept a list of split names
         self.filter_splits = cfg.get('pre_scan', [])
-        # Convert to list if a string was provided
         if isinstance(self.filter_splits, str):
             self.filter_splits = [self.filter_splits]
         self.embedding_used = cfg.get('embedding', None)
