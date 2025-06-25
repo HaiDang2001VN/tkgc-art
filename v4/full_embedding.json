@@ -1,8 +1,8 @@
 {
     "batch_size": 4096,
     "lr": 0.001,
-    "epochs": 10,
+    "epochs": 50,
     "model_name": "transe",
-    "hidden_channels": 128,
+    "hidden_channels": 256,
     "p_norm": 2
 }
