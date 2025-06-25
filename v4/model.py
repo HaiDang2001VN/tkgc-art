@@ -403,6 +403,9 @@ class PathPredictor(LightningModule):
                 "adjusted_score": float(adjusted_scores[i]),
                 "mean_z": float(mean_z[i]) if mean_z[i] is not None else None,
                 "loss": float(losses[i]) if losses[i] is not None else None,
+                "source_node": source_nodes[i],
+                "target_node": target_nodes[i],
+                "timestamp": timestamps[i],
             })
 
         with open(export_path, "w") as f:
