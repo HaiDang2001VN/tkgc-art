@@ -150,7 +150,7 @@ class PathDataModule(LightningDataModule):
 
         if isinstance(num_threads, str):
             if num_threads.lower() == 'auto':
-                num_threads = max(1, mp.cpu_count() - 4)
+                num_threads = max(1, mp.cpu_count() - 2)
             elif num_threads.lower() == 'vast':
                 cid = os.getenv("CONTAINER_ID")
                 key = os.getenv("CONTAINER_API_KEY")
@@ -164,7 +164,7 @@ class PathDataModule(LightningDataModule):
                     timeout=10,
                 )
                 info = resp.json()
-                num_threads = int(info['instances']["cpu_cores_effective"])
+                num_threads = int(info['instances']["cpu_cores_effective"]) - 2
                 print("Effective vCPUs (Vast.ai):", num_threads)
 
         if isinstance(batch_size_cfg, str):

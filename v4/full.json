@@ -18,6 +18,7 @@
   "pre_scan": ["train"],
   "adjust_no_neg_paths_samples": true,
   "max_adjust": 5.0,
+  "positive_deviation": true,
   "embedding": "all",
   "test_time": 4,
   "num_ckpt": 2,

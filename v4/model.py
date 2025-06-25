@@ -64,6 +64,7 @@ class PathPredictor(LightningModule):
         lr=1e-4,
         scale_loss=False,
         chi2=False,
+        positive_deviation=False,
         **kwargs  # Additional hyperparameters
     ):
         super().__init__()
@@ -173,7 +174,9 @@ class PathPredictor(LightningModule):
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
             if neg.numel():
-                mean, std = neg.mean(0), neg.std(0, unbiased=False)
+                refs = slice_diff if self.hparams.positive_deviation else neg
+                
+                mean, std = refs.mean(0), refs.std(0, unbiased=False)
                 z = (pos - mean)/(std+1e-8)
                 mean_z = z.mean() if label else -z.mean()
 
@@ -218,7 +221,9 @@ class PathPredictor(LightningModule):
             pos, neg = slice_diff[0], slice_diff[1:]
             
             if neg.numel():
-                mean, std = neg.mean(0), neg.std(0, unbiased=False)
+                refs = slice_diff if self.hparams.positive_deviation else neg
+                
+                mean, std = refs.mean(0), refs.std(0, unbiased=False)
                 z_pos = (pos - mean)/(std+1e-8)
                 mean_z_pos = z_pos.mean()
                 
@@ -246,7 +251,8 @@ class PathPredictor(LightningModule):
             # Create item with organized structure
             item = {
                 'score': percentile_pos,  # Single percentile from mean z-score
-                'distance': pos.detach().cpu().numpy(),  # Distance for positive sample
+                'pos_dist': pos.detach().cpu().numpy(),  # Distance for positive sample
+                'neg_dist': neg.detach().cpu().numpy() if neg.numel() > 0 else None,  # Distances for negative samples
                 'length': length,  # Path length for this sample
                 'label': label,  # Label for this sample
                 'has_neg': neg.numel() > 0
@@ -280,10 +286,10 @@ class PathPredictor(LightningModule):
         pos_losses = []
         neg_losses = []
         for output in outputs:
-            if output and 'loss' in output and output['loss'] is not None:
-                if output['label'] == 1:
+            if output and 'loss' in output and output['loss'] is not None and 'item' in output:
+                if output['item']['label'] == 1:
                     pos_losses.append(output['loss'])
-                else:
+                elif output['item']['label'] == 0:
                     neg_losses.append(output['loss'])
         
         if pos_losses:
@@ -312,7 +318,7 @@ class PathPredictor(LightningModule):
             print(f"Warning: No valid losses found in {stage} step. Skipping {stage} loss logging.")
         
         # Extract and organize values for evaluation
-        scores, lengths, labels, has_neg, distances = [], [], [], [], []
+        scores, lengths, labels, has_neg, pos_dist, neg_dists = [], [], [], [], []
         
         for output in outputs:
             if output and 'items' in output:
@@ -321,7 +327,8 @@ class PathPredictor(LightningModule):
                     lengths.append(item.get('length', 0))
                     labels.append(item['label'])
                     has_neg.append(item.get('has_neg', False))
-                    distances.append(item.get('distance', None))
+                    pos_dist.append(item.get('pos_dist', None))
+                    neg_dists.append(item.get('neg_dist', None))
         
         if not scores:
             print(f"Warning: No items with scores found in {stage} outputs. Skipping evaluation.")
@@ -375,9 +382,9 @@ class PathPredictor(LightningModule):
                 "length": int(lengths[i]),
                 "label": int(labels[i]),
                 "has_neg": bool(has_neg[i]),
-                "distance": (
-                    distances[i].tolist() if hasattr(distances[i], "tolist") else distances[i]
-                ),
+                "pos_dist": pos_dist[i].tolist() if pos_dist[i] is not None else None,
+                "neg_dist": neg_dists[i].tolist() if neg_dists[i] is not None else None,
+                "adjusted_score": float(adjusted_scores[i]),
             })
 
         with open(export_path, "w") as f:
@@ -447,6 +454,7 @@ def main():
         'lr': cfg.get('lr', 1e-4),
         'scale_loss': cfg.get('scale_loss', False),
         'chi2': cfg.get('chi2', False),
+        'positive_deviation': cfg.get('positive_deviation', False),
     }
     
     # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
