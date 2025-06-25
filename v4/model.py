@@ -306,7 +306,7 @@ class PathPredictor(LightningModule):
             print(f"Warning: No positive losses found in {stage} step. Skipping {stage} positive loss logging.")
         
         if neg_losses:
-            neg_epoch_loss = torch.stack(neg_losses).mean()
+            neg_epoch_loss = -torch.stack(neg_losses).mean()
             self.log(f'{stage}_neg_loss', neg_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
             print(f"{stage.capitalize()} negative loss: {neg_epoch_loss.item()}")
         else:
@@ -322,7 +322,11 @@ class PathPredictor(LightningModule):
             print(f"Warning: No valid losses found in {stage} step. Skipping {stage} loss logging.")
         
         # Extract and organize values for evaluation
-        scores, lengths, labels, has_neg, pos_dist, neg_dists, mean_z, losses = [], [], [], [], [], [], [], []
+        scores, lengths, labels, has_neg = [], [], [], []
+        pos_dist, neg_dists, mean_z, losses = [], [], [], []
+        
+        # New lists for edge information
+        source_nodes, target_nodes, timestamps = [], [], []
         
         max_hops = self.hparams.max_hops
         max_adjust = self.hparams.get('max_adjust', 1.0)
@@ -330,6 +334,7 @@ class PathPredictor(LightningModule):
         for output in tqdm(outputs, desc=f"Processing {stage} outputs"):
             if output and 'items' in output:
                 for item in output['items']:
+                    # Collect standard evaluation data
                     scores.append(item['score'])
                     lengths.append(item['length'] if item['length'] is not None else max_hops + 2)
                     labels.append(item['label'])
@@ -338,6 +343,11 @@ class PathPredictor(LightningModule):
                     neg_dists.append(item.get('neg_dist', None))
                     mean_z.append(item.get('mean_z_pos', None))
                     losses.append(item.get('loss', None))
+                    
+                    # Collect edge information if available
+                    source_nodes.append(item.get('u', None))
+                    target_nodes.append(item.get('v', None))
+                    timestamps.append(item.get('ts', None))
         
         if not scores:
             print(f"Warning: No items with scores found in {stage} outputs. Skipping evaluation.")

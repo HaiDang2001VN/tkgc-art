@@ -266,34 +266,38 @@ float score_rotate(const std::vector<float> &h, const std::vector<float> &r, con
 }
 
 // --- Meta-Path Guided Beam Search ---
-std::vector<Path> beam_search_for_edge(
+// Change this to return both paths and their timestamps
+std::pair<std::vector<Path>, std::vector<std::vector<int>>> beam_search_for_edge(
     int u, int ts, int beam_width, const MetaPathPattern &pattern,
     const AdjacencyList &adj, const std::unordered_map<int, int> &node_to_type,
     const std::set<int> &direct_neighbors,
     const EmbeddingMap &node_embeddings, const EmbeddingMap &relation_embeddings,
     const std::function<float(const std::vector<float> &, const std::vector<float> &, const std::vector<float> &)> &score_func,
-    const std::set<int> &true_path_nodes) // New parameter
+    const std::set<int> &true_path_nodes)
 {
     std::vector<Path> current_beam;
+    std::vector<std::vector<int>> current_timestamps; // Track timestamps for each path
+    
     current_beam.push_back({u});
+    current_timestamps.push_back({}); // Empty timestamp vector to start
 
     int max_depth = static_cast<int>(pattern.steps.size());
     
-    // Determine whether to exclude direct neighbors based on hop count
-    // If pattern has >= 2 steps (hops), then exclude direct neighbors at the end
     bool exclude_direct_neighbors = (max_depth >= 2);
-    bool search_completed_successfully = true; // Flag to track if search finished
+    bool search_completed_successfully = true;
 
     for (int depth = 0; depth < max_depth; ++depth)
     {
-        std::vector<std::pair<float, Path>> scored_candidates;
+        std::vector<std::tuple<float, Path, std::vector<int>>> scored_candidates; // Score, path, timestamps
 
-        // Get expected edge type and target node type from meta-path pattern
-        int expected_edge_type = std::get<0>(pattern.steps[depth]);   // First element (edge_type)
-        int expected_node_type = std::get<1>(pattern.steps[depth]);   // Second element (target_node_type)
+        int expected_edge_type = std::get<0>(pattern.steps[depth]);
+        int expected_node_type = std::get<1>(pattern.steps[depth]);
 
-        for (const auto &path : current_beam)
+        for (size_t path_idx = 0; path_idx < current_beam.size(); ++path_idx)
         {
+            const auto &path = current_beam[path_idx];
+            const auto &path_timestamps = current_timestamps[path_idx];
+            
             int last_node = path.back();
 
             // Check if node exists in adjacency list
@@ -326,7 +330,6 @@ std::vector<Path> beam_search_for_edge(
 
                 // Only exclude direct neighbors at the final step (depth == max_depth-1) 
                 // and only if the path has >= 2 hops
-                // if (exclude_direct_neighbors && depth == (max_depth - 1) && direct_neighbors.count(neighbor_node))
                 if (exclude_direct_neighbors && depth > 0 && direct_neighbors.count(neighbor_node))
                     continue;
     
@@ -335,10 +338,13 @@ std::vector<Path> beam_search_for_edge(
                     node_to_type.at(neighbor_node) != expected_node_type)
                     continue;
 
-                // Create new path
+                // Create new path and timestamps
                 Path new_path = path;
+                std::vector<int> new_timestamps = path_timestamps;
+                
                 new_path.push_back(expected_edge_type);
                 new_path.push_back(neighbor_node);
+                new_timestamps.push_back(timestamp); // Add the timestamp of this edge
 
                 // Score the path using KGE model
                 try
@@ -347,7 +353,7 @@ std::vector<Path> beam_search_for_edge(
                     const auto &r_emb = relation_embeddings.at(expected_edge_type);
                     const auto &t_emb = node_embeddings.at(neighbor_node);
                     float score = score_func(h_emb, r_emb, t_emb);
-                    scored_candidates.push_back({score, new_path});
+                    scored_candidates.emplace_back(score, new_path, new_timestamps);
                 }
                 catch (const std::out_of_range &oor)
                 {
@@ -366,28 +372,32 @@ std::vector<Path> beam_search_for_edge(
         // Sort by score (descending) and keep top beam_width candidates
         std::sort(scored_candidates.begin(), scored_candidates.end(),
                   [](const auto &a, const auto &b)
-                  { return a.first > b.first; });
+                  { return std::get<0>(a) > std::get<0>(b); });
 
         if (scored_candidates.size() > beam_width)
         {
             scored_candidates.resize(beam_width);
         }
 
-        // Update current beam
+        // Update current beam and timestamps
         current_beam.clear();
-        for (const auto &scored_path : scored_candidates)
+        current_timestamps.clear();
+        
+        for (const auto &scored_info : scored_candidates)
         {
-            current_beam.push_back(scored_path.second);
+            current_beam.push_back(std::get<1>(scored_info));
+            current_timestamps.push_back(std::get<2>(scored_info));
         }
     }
 
-    // If the search was disrupted and did not complete, return an empty vector.
+    // If the search was disrupted and did not complete, return empty vectors
     if (!search_completed_successfully)
     {
         current_beam.clear();
+        current_timestamps.clear();
     }
 
-    return current_beam;
+    return {current_beam, current_timestamps};
 }
 
 // --- Main Execution ---
@@ -531,7 +541,7 @@ int main(int argc, char *argv[])
 
     // 5. Run Meta-Path Guided Beam Search
     log_stream << "[Info] " << getCurrentTimestamp() << " Starting meta-path guided beam search..." << std::endl;
-    std::map<int, std::vector<Path>> final_results;
+    std::map<int, std::pair<std::vector<Path>, std::vector<std::vector<int>>>> final_results;
 
     for (const auto &q : queries)
     {
@@ -575,40 +585,64 @@ int main(int argc, char *argv[])
         const ShortestPathInfo& true_path_info = shortest_paths.at(eid);
         std::set<int> true_path_nodes(true_path_info.nodes.begin(), true_path_info.nodes.end());
 
-        auto found_paths = beam_search_for_edge(u_node, ts_val, beam_width, pattern, adj,
-                                          node_to_type, direct_neighbors,
-                                          node_embeddings, relation_embeddings, score_func,
-                                          true_path_nodes);
+        auto [found_paths, path_timestamps] = beam_search_for_edge(u_node, ts_val, beam_width, pattern, adj,
+                                                        node_to_type, direct_neighbors,
+                                                        node_embeddings, relation_embeddings, score_func,
+                                                        true_path_nodes);
         if (!found_paths.empty())
         {
-            final_results[eid] = found_paths;
+            final_results[eid] = {found_paths, path_timestamps};
         }
     }
 
-    // 6. Save results to JSON (now to std::cout)
+    // 6. Save results to JSON with timestamps
     std::cout << "{\n"; // Output to stdout
     bool first_entry = true;
     for (const auto &pair : final_results)
     {
         if (!first_entry)
             std::cout << ",\n"; // Output to stdout
-        std::cout << "  \"" << pair.first << "\": [\n"; // Output to stdout
-        for (size_t i = 0; i < pair.second.size(); ++i)
+        
+        int eid = pair.first;
+        const auto &paths = pair.second.first;
+        const auto &timestamps = pair.second.second;
+        
+        std::cout << "  \"" << eid << "\": {\n"; // Output to stdout
+        
+        // Output paths
+        std::cout << "    \"paths\": [\n"; // Output to stdout
+        for (size_t i = 0; i < paths.size(); ++i)
         {
-            std::cout << "    ["; // Output to stdout
-            for (size_t j = 0; j < pair.second[i].size(); ++j)
+            std::cout << "      ["; // Output to stdout
+            for (size_t j = 0; j < paths[i].size(); ++j)
             {
-                std::cout << pair.second[i][j] << (j == pair.second[i].size() - 1 ? "" : ", "); // Output to stdout
+                std::cout << paths[i][j] << (j == paths[i].size() - 1 ? "" : ", "); // Output to stdout
             }
-            std::cout << "]" << (i == pair.second.size() - 1 ? "" : ","); // Output to stdout
+            std::cout << "]" << (i == paths.size() - 1 ? "" : ","); // Output to stdout
             std::cout << "\n"; // Output to stdout
         }
-        std::cout << "  ]"; // Output to stdout
+        std::cout << "    ],\n"; // Output to stdout
+        
+        // Output timestamps
+        std::cout << "    \"timestamps\": [\n"; // Output to stdout
+        for (size_t i = 0; i < timestamps.size(); ++i)
+        {
+            std::cout << "      ["; // Output to stdout
+            for (size_t j = 0; j < timestamps[i].size(); ++j)
+            {
+                std::cout << timestamps[i][j] << (j == timestamps[i].size() - 1 ? "" : ", "); // Output to stdout
+            }
+            std::cout << "]" << (i == timestamps.size() - 1 ? "" : ","); // Output to stdout
+            std::cout << "\n"; // Output to stdout
+        }
+        std::cout << "    ]\n"; // Output to stdout
+        
+        std::cout << "  }"; // Output to stdout
         first_entry = false;
     }
     std::cout << "\n}\n"; // Output to stdout
 
-    log_stream << "[Info] " << getCurrentTimestamp() << " Finished processing. Results output to stdout." << std::endl;
+    log_stream << "[Info] " << getCurrentTimestamp() << " Finished processing. Results with timestamps output to stdout." << std::endl;
     log_stream.close();
 
     return 0;

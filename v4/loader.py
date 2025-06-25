@@ -52,6 +52,18 @@ class EdgeDataset(Dataset):
         # Create label tensor on CPU
         item['label'] = torch.tensor(label, dtype=torch.long)  # CPU default
         
+        # Add edge information to the item dictionary
+        if 'u' in self.df.columns:
+            item['u'] = torch.tensor(self.df.at[eid, 'u'], dtype=torch.long)
+        if 'v' in self.df.columns:
+            item['v'] = torch.tensor(self.df.at[eid, 'v'], dtype=torch.long)
+        
+        # Check for timestamp column (could be 'ts' or 'timestamp')
+        if 'ts' in self.df.columns:
+            item['ts'] = torch.tensor(self.df.at[eid, 'ts'], dtype=torch.long)
+        elif 'timestamp' in self.df.columns:
+            item['ts'] = torch.tensor(self.df.at[eid, 'timestamp'], dtype=torch.long)
+        
         if pos_nodes is None: # If no positive path, skip this item
             return item # Still returns the label in order for later evaluation if needed
         
@@ -72,9 +84,7 @@ class EdgeDataset(Dataset):
         # e.g., [[pos_n1, pos_n2], [neg1_n1, neg1_n2, neg1_n3], [neg2_n1, neg2_n2]]
         all_paths_nodes_only = [pos_nodes] + negs_nodes_only
         
-        
-        # Store paths as a list of lists of integers. Tensor conversion (if needed) happens later,
-        # possibly after padding in the model or a more sophisticated collate_fn.
+        # Store paths as a list of lists of integers
         item['paths'] = all_paths_nodes_only
         
         # if self.features_map is not None:

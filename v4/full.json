@@ -7,7 +7,7 @@
   "max_hops": 4,
   "num_neg": 50,
   "num_threads": "vast",
-  "max_epochs": 10,
+  "max_epochs": 2,
   "batch_size": "vast",
   "dim_feedforward": 128,
   "nhead": 4,
@@ -21,10 +21,10 @@
   "max_adjust": 5.0,
   "positive_deviation": true,
   "embedding": "all",
-  "test_time": 4,
+  "test_time": 1,
   "num_ckpt": 2,
   "scale_loss": true,
   "chi2": false,
-  "lr": 0.001,
+  "lr": 0.0001,
   "wandb_project": "thesis-graph"
 }
