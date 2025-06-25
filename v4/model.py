@@ -511,8 +511,8 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     
     # Configure Wandb logger
-    logger = WandbLogger(
-        name=f"{embedding_model}_{dataset_name}",
+    train_logger = WandbLogger(
+        name=f"{embedding_model}_{dataset_name}_train",
         save_dir=log_dir,
         project=cfg.get("wandb_project", "thesis-graph"),
         entity=cfg.get("wandb_entity", None),
@@ -520,19 +520,28 @@ def main():
     )
 
     ckpt = ModelCheckpoint(monitor='val_loss', save_top_k=cfg.get('num_ckpt', 1), dirpath=log_dir, mode='min')
-    trainer = Trainer(max_epochs=max_epochs, callbacks=[ckpt], logger=logger)
+    trainer = Trainer(max_epochs=max_epochs, callbacks=[ckpt], logger=train_logger)
     trainer.fit(model, dm)
 
     # Run the test stage after training is complete, using the best checkpoint
     print("\n--- Running Test Stage ---")
     trainer.test(model, datamodule=dm, ckpt_path='best')
     
+    # Test logger
+    test_logger = WandbLogger(
+        name=f"{embedding_model}_{dataset_name}_test",
+        save_dir=log_dir,
+        project=cfg.get("wandb_project", "thesis-graph"),
+        entity=cfg.get("wandb_entity", None),
+        log_model=True
+    )
+    
     # Run the test-time evaluation
     print("\n--- Running Test-Time Evaluation ---")
     test_epochs = cfg.get('test_time', 0)
     if test_epochs > 0:
         dm.test_time = True
-        test_trainer = Trainer(max_epochs=test_epochs, logger=logger, callbacks=[ckpt])
+        test_trainer = Trainer(max_epochs=test_epochs, logger=test_logger, callbacks=[ckpt])
         test_trainer.fit(model, dm)
 
 

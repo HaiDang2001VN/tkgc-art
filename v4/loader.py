@@ -27,6 +27,7 @@ class EdgeDataset(Dataset):
         df: pd.DataFrame,
         pos_paths: dict,
         neg_paths: dict,
+        neg_path_timestamps: dict,
         features_map: Union[dict, None],
         kge_proxy: Union[KGEModelProxy, None],
         num_neg: Union[int, None] = None
@@ -35,6 +36,7 @@ class EdgeDataset(Dataset):
         self.edge_ids = df.index.tolist()
         self.pos_paths = pos_paths
         self.neg_paths = neg_paths
+        self.neg_path_timestamps = neg_path_timestamps
         self.features_map = features_map
         self.kge_proxy = kge_proxy
         self.num_neg = num_neg
@@ -45,8 +47,11 @@ class EdgeDataset(Dataset):
     def __getitem__(self, idx):
         eid = self.edge_ids[idx]
         label = self.df.at[eid, 'label'].astype(int)
-        # Positive paths are expected to be lists of nodes already
-        pos_nodes = self.pos_paths.get(str(eid), {}).get('nodes')
+        
+        # Get positive path info
+        pos_path_info = self.pos_paths.get(str(eid), {})
+        pos_nodes = pos_path_info.get('nodes')
+        pos_edge_timestamps = pos_path_info.get('edge_timestamps', [])
         
         item = {}
         # Create label tensor on CPU
@@ -67,11 +72,22 @@ class EdgeDataset(Dataset):
         if pos_nodes is None: # If no positive path, skip this item
             return item # Still returns the label in order for later evaluation if needed
         
-        # Negative paths from preprocess.cpp are interleaved: [node0, edge_type1, node1, ...]
+        # Get negative paths and their timestamps
         raw_neg_interleaved_paths = self.neg_paths.get(str(eid), [])
+        raw_neg_timestamps = self.neg_path_timestamps.get(str(eid), [])
         
+        # Sample negative paths and their timestamps together
         if self.num_neg is not None and len(raw_neg_interleaved_paths) > self.num_neg:
-            raw_neg_interleaved_paths = random.sample(raw_neg_interleaved_paths, self.num_neg)
+            if len(raw_neg_interleaved_paths) == len(raw_neg_timestamps):
+                sampled = random.sample(list(zip(raw_neg_interleaved_paths, raw_neg_timestamps)), self.num_neg)
+                if sampled:
+                    raw_neg_interleaved_paths, raw_neg_timestamps = map(list, zip(*sampled))
+                else:
+                    raw_neg_interleaved_paths, raw_neg_timestamps = [], []
+            else: # Fallback if lists are mismatched, just sample paths
+                raw_neg_interleaved_paths = random.sample(raw_neg_interleaved_paths, self.num_neg)
+                # Create empty lists for timestamps to maintain structure
+                raw_neg_timestamps = [[] for _ in range(len(raw_neg_interleaved_paths))]
         
         negs_nodes_only = []
         for p_interleaved in raw_neg_interleaved_paths:
@@ -84,8 +100,12 @@ class EdgeDataset(Dataset):
         # e.g., [[pos_n1, pos_n2], [neg1_n1, neg1_n2, neg1_n3], [neg2_n1, neg2_n2]]
         all_paths_nodes_only = [pos_nodes] + negs_nodes_only
         
-        # Store paths as a list of lists of integers
+        # Combine timestamps for all paths
+        all_path_timestamps = [pos_edge_timestamps] + list(raw_neg_timestamps)
+
+        # Store paths and timestamps as a list of lists of integers
         item['paths'] = all_paths_nodes_only
+        item['path_timestamps'] = all_path_timestamps
         
         # if self.features_map is not None:
         #     feats_for_all_paths = [] # This will be a list of tensors
@@ -204,6 +224,7 @@ class PathDataModule(LightningDataModule):
         self.data = {}
         self.pos_paths = {}
         self.neg_paths = {}
+        self.neg_path_timestamps = {}
         self.kge_proxy = {}
         self.features_map = {}
 
@@ -243,25 +264,48 @@ class PathDataModule(LightningDataModule):
 
                 pos_paths = {}
                 with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
-                    n = int(f.readline())
+                    n_str = f.readline()
+                    n = int(n_str) if n_str and n_str.strip() else 0
                     for _ in range(n):
                         eid = f.readline().strip()
+                        if not eid:
+                            break
                         hops = int(f.readline())
                         nodes = [int(u) for u in f.readline().split()]
                         node_types = [int(t) for t in f.readline().split()]
-                        edge_types = f.readline().split()
+                        edge_types_str = f.readline().strip().split()
+                        edge_types = [int(et) for et in edge_types_str if et]
+                        
+                        edge_timestamps_str = f.readline().strip().split()
+                        edge_timestamps = [int(ts) for ts in edge_timestamps_str if ts]
 
-                        if self.split_map[eid] == split:
+                        if self.split_map.get(eid) == split:
                             pos_paths[eid] = {
                                 "hops": hops,
                                 "nodes": nodes,
                                 "node_types": node_types,
-                                "edge_types": edge_types
+                                "edge_types": edge_types,
+                                "edge_timestamps": edge_timestamps
                             }
 
                 self.pos_paths[split] = pos_paths
                 neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{split}_neg.json")
-                self.neg_paths[split] = json.load(open(neg_fn))
+                
+                raw_neg_data = json.load(open(neg_fn))
+                neg_paths = {}
+                neg_path_timestamps = {}
+                for eid, data in raw_neg_data.items():
+                    # New format: {"eid": {"paths": [...], "timestamps": [...]}}
+                    if isinstance(data, dict) and "paths" in data:
+                        neg_paths[eid] = data.get("paths", [])
+                        neg_path_timestamps[eid] = data.get("timestamps", [])
+                    else:
+                        # Fallback for old format: {"eid": [...]}
+                        neg_paths[eid] = data
+                        neg_path_timestamps[eid] = []
+                
+                self.neg_paths[split] = neg_paths
+                self.neg_path_timestamps[split] = neg_path_timestamps
 
                 # Check if this split should be pre-scanned
                 if split in self.filter_splits:
@@ -322,6 +366,7 @@ class PathDataModule(LightningDataModule):
     def _dataloader(self, split: str, shuffle: bool):
         ds = EdgeDataset(
             self.data[split], self.pos_paths[split], self.neg_paths[split],
+            self.neg_path_timestamps[split],
             self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg
         )
         return DataLoader(
