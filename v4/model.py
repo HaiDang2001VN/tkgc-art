@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import math
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -288,7 +289,7 @@ class PathPredictor(LightningModule):
         # Calculate epoch-level loss
         pos_losses = []
         neg_losses = []
-        for output in outputs:
+        for output in tqdm(outputs, desc=f"Processing {stage} losses"):
             if output and 'loss' in output and output['loss'] is not None and 'items' in output:
                 for item in output['items']:
                     if 'loss' in item and item['loss'] is not None:
@@ -328,7 +329,7 @@ class PathPredictor(LightningModule):
         max_hops = self.hparams.max_hops
         max_adjust = self.hparams.get('max_adjust', 1.0)
         
-        for output in outputs:
+        for output in tqdm(outputs, desc=f"Processing {stage} outputs"):
             if output and 'items' in output:
                 for item in output['items']:
                     scores.append(item['score'])
