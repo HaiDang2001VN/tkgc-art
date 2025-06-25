@@ -164,7 +164,7 @@ class PathDataModule(LightningDataModule):
                     timeout=10,
                 )
                 info = resp.json()
-                num_threads = int(info['instances']["cpu_cores_effective"]) - 2
+                num_threads = int(info['instances']["cpu_cores_effective"]) - 6
                 print("Effective vCPUs (Vast.ai):", num_threads)
 
         if isinstance(batch_size_cfg, str):
