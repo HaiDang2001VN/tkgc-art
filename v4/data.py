@@ -265,7 +265,7 @@ def process_tgb_dataset(configuration):
     u_map, v_map, u_type_map, v_type_map, edge_type_map = {}, {}, {}, {}, {}
     u_id, v_id, u_type_id, v_type_id, edge_type_id = 0, 0, 0, 0, 0
 
-    for split, mask in [('train', tgb_dataset.train_mask), ('valid', tgb_dataset.val_mask), ('test', tgb_dataset.test_mask)]:
+    for split, mask in [('train', tgb_dataset.train_mask), ('val', tgb_dataset.val_mask), ('test', tgb_dataset.test_mask)]:
         idxs = np.where(mask)[0]
         u_nodes, v_nodes, ts_vals, edge_types = (
             data['sources'][idxs], data['destinations'][idxs],
@@ -300,7 +300,14 @@ def process_tgb_dataset(configuration):
                 'label': 1, 'edge_type': edge_type_map[edge_type_val]
             })
 
-        if split in ('valid', 'test'):
+        if split in ('val', 'test'):            
+            pkl_path = os.path.join(
+                configuration['storage_dir'],
+                configuration['dataset'].replace('-', '_'),
+                f"{configuration['dataset']}_{split}_ns_v2.pkl")
+            pkl_path = os.path.abspath(pkl_path)
+            tgb_dataset.negative_sampler.load_eval_set(pkl_path, split)
+            
             neg_lists = tgb_dataset.negative_sampler.query_batch(
                 u_nodes, v_nodes, ts_vals, edge_type=edge_types, split_mode=split
             )
