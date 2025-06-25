@@ -259,7 +259,7 @@ class PathPredictor(LightningModule):
                 'length': length,  # Path length for this sample
                 'label': label,  # Label for this sample
                 'has_neg': neg.numel() > 0,
-                'loss': loss.item() if loss else None  # Loss for this sample'
+                'loss': loss  # Loss for this sample'
             }
             batch_items.append(item)
             ptr += num_paths
