@@ -318,7 +318,7 @@ class PathPredictor(LightningModule):
             print(f"Warning: No valid losses found in {stage} step. Skipping {stage} loss logging.")
         
         # Extract and organize values for evaluation
-        scores, lengths, labels, has_neg, pos_dist, neg_dists = [], [], [], [], []
+        scores, lengths, labels, has_neg, pos_dist, neg_dists = [], [], [], [], [], []
         
         for output in outputs:
             if output and 'items' in output:
