@@ -177,7 +177,7 @@ class PathPredictor(LightningModule):
             if neg.numel():
                 refs = slice_diff if self.hparams.positive_deviation else neg
                 
-                mean, std = refs.mean(0), refs.std(0, unbiased=False)
+                mean, std = refs.mean(0), refs.std(0, correction=0)
                 z = (pos - mean)/(std+1e-8)
                 mean_z = z.mean() if label else -z.mean()
 
@@ -226,7 +226,7 @@ class PathPredictor(LightningModule):
             if neg.numel():
                 refs = slice_diff if self.hparams.positive_deviation else neg
                 
-                mean, std = refs.mean(0), refs.std(0, unbiased=False)
+                mean, std = refs.mean(0), refs.std(0, correction=0)
                 z_pos = (pos - mean)/(std+1e-8)
                 mean_z_pos = z_pos.mean()
                 
@@ -240,10 +240,10 @@ class PathPredictor(LightningModule):
                     # CDF of chi distribution
                     chi_dist = torch.distributions.chi.Chi(df)
                     cdf_val = chi_dist.cdf(chi_stat)
-                    percentile_pos = 1 - cdf_val.item()
+                    percentile_pos = 1.0 - cdf_val.item()
                 else:
                     # Convert mean z-score to percentile for positive sample using normal CDF
-                    percentile_pos = 1 - torch.special.ndtr(mean_z_pos).item()
+                    percentile_pos = 1.0 - torch.special.ndtr(mean_z_pos).item()
                 
                 # Calculate mean z-score for loss
                 loss = torch.asinh(mean_z_pos) if self.scale_loss else mean_z_pos
@@ -333,7 +333,7 @@ class PathPredictor(LightningModule):
             if output and 'items' in output:
                 for item in output['items']:
                     scores.append(item['score'])
-                    lengths.append(item.get('length', max_hops + 2))
+                    lengths.append(item['length'] if item['length'] is not None else max_hops + 2)
                     labels.append(item['label'])
                     has_neg.append(item.get('has_neg', False))
                     pos_dist.append(item.get('pos_dist', None))
