@@ -218,7 +218,7 @@ class PathPredictor(LightningModule):
             
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
-            loss = None
+            loss, mean_z_pos = None, None
             
             if neg.numel() > 0:
                 refs = slice_diff if self.hparams.positive_deviation else neg
@@ -256,7 +256,8 @@ class PathPredictor(LightningModule):
                 'length': length,  # Path length for this sample
                 'label': label,  # Label for this sample
                 'has_neg': neg.numel() > 0,
-                'loss': loss  # Loss for this sample'
+                'loss': loss,  # Loss for this sample'
+                'mean_z_pos': mean_z_pos
             }
             batch_items.append(item)
             ptr += num_paths
@@ -321,7 +322,7 @@ class PathPredictor(LightningModule):
             print(f"Warning: No valid losses found in {stage} step. Skipping {stage} loss logging.")
         
         # Extract and organize values for evaluation
-        scores, lengths, labels, has_neg, pos_dist, neg_dists = [], [], [], [], [], []
+        scores, lengths, labels, has_neg, pos_dist, neg_dists, mean_z, losses = [], [], [], [], [], [], [], []
         
         max_hops = self.hparams.max_hops
         max_adjust = self.hparams.get('max_adjust', 1.0)
@@ -335,6 +336,8 @@ class PathPredictor(LightningModule):
                     has_neg.append(item.get('has_neg', False))
                     pos_dist.append(item.get('pos_dist', None))
                     neg_dists.append(item.get('neg_dist', None))
+                    mean_z.append(item.get('mean_z_pos', None))
+                    losses.append(item.get('loss', None))
         
         if not scores:
             print(f"Warning: No items with scores found in {stage} outputs. Skipping evaluation.")
@@ -388,6 +391,8 @@ class PathPredictor(LightningModule):
                 "pos_dist": pos_dist[i].tolist() if pos_dist[i] is not None else None,
                 "neg_dist": neg_dists[i].tolist() if neg_dists[i] is not None else None,
                 "adjusted_score": float(adjusted_scores[i]),
+                "mean_z": float(mean_z[i]) if mean_z[i] is not None else None,
+                "loss": float(losses[i]) if losses[i] is not None else None,
             })
 
         with open(export_path, "w") as f:
