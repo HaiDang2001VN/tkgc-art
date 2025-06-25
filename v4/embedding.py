@@ -8,7 +8,7 @@ from torch import nn, Tensor
 from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.nn.kge import DistMult, ComplEx, RotatE, TransE
-from utils import load_configuration, norm as utils_norm
+from utils import load_configuration#, norm as utils_norm
 import numpy as np
 import multiprocessing as mp
 
@@ -97,8 +97,8 @@ class KGEModelProxy(nn.Module):
             print(
                 f"No relation embeddings found for model {self.model_name}. Skipping text save for relations.")
 
-    def norm(self, tensor: Tensor, dim: int = -1) -> Tensor:
-        return utils_norm(tensor, self.model, self.model_name, dim)
+    # def norm(self, tensor: Tensor, dim: int = -1) -> Tensor:
+    #     return utils_norm(tensor, self.model, self.model_name, dim)
 
     def forward(self, batched_paths: Tensor) -> Tensor:
         heads = batched_paths[:, -1]

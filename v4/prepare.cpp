@@ -11,6 +11,7 @@
 #include <map>
 #include <chrono>   // Added
 #include <iomanip>  // Added
+#include <tuple>
 
 using namespace std;
 
@@ -153,7 +154,7 @@ int main(int argc, char **argv)
     log_stream << "[Info] " << getCurrentTimestamp() << " Rows sorted." << endl;
 
     // 3) Incremental graph storage
-    unordered_map<int, vector<pair<int, int>>> adj; 
+    unordered_map<int, vector<tuple<int, int, int>>> adj; 
     int cur_ts = rows.empty() ? 0 : rows.back().ts; 
     vector<Row> buffer;
     int paths_found_count = 0; // Counter for paths found
@@ -165,8 +166,8 @@ int main(int argc, char **argv)
             if (buf_r.label != 1)
                 continue; 
             
-            adj[buf_r.u].emplace_back(buf_r.v, buf_r.edge_type); 
-            adj[buf_r.v].emplace_back(buf_r.u, buf_r.edge_type); 
+            adj[buf_r.u].emplace_back(buf_r.v, buf_r.edge_type, buf_r.ts); 
+            adj[buf_r.v].emplace_back(buf_r.u, buf_r.edge_type, buf_r.ts); 
         }
         buffer.clear();
     };
@@ -218,7 +219,7 @@ int main(int argc, char **argv)
                 if (adj.count(cur_node_id)) {
                     for (auto &pr : adj.at(cur_node_id)) 
                     {
-                        int neighbor_node_id = pr.first; 
+                        int neighbor_node_id = get<0>(pr); 
                         if (!node_depths.count(neighbor_node_id)) 
                         {
                             parent_map[neighbor_node_id] = cur_node_id; 
@@ -251,6 +252,7 @@ int main(int argc, char **argv)
                 paths_found_count++; // Increment counter
                 vector<int> edge_types; 
                 vector<int> node_types_in_path; 
+                vector<int> edge_timestamps;
                 for (size_t i = 0; i + 1 < best.size(); ++i)
                 {
                     int current_path_node_id = best[i]; 
@@ -259,9 +261,10 @@ int main(int argc, char **argv)
                     if (adj.count(current_path_node_id)) {
                         for (auto &pr : adj.at(current_path_node_id)) 
                         {
-                            if (pr.first == next_path_node_id)
+                            if (get<0>(pr) == next_path_node_id)
                             {
-                                edge_types.push_back(pr.second);
+                                edge_types.push_back(get<1>(pr));
+                                edge_timestamps.push_back(get<2>(pr));
                                 found_edge = true;
                                 break;
                             }
@@ -287,7 +290,7 @@ int main(int argc, char **argv)
                     }
                 }
 
-                // Output format: eid;hops;nodes;node_types;edge_types
+                // Output format: eid;hops;nodes;node_types;edge_types;edge_timestamps
                 cout << r.edge_id << ";";
                 cout << best.size() - 1 << ";"; // hops
 
@@ -306,6 +309,12 @@ int main(int argc, char **argv)
                 for (size_t i = 0; i < edge_types.size(); ++i)
                 {
                     cout << edge_types[i] << (i == edge_types.size() - 1 ? "" : ",");
+                }
+                cout << ";";
+
+                for (size_t i = 0; i < edge_timestamps.size(); ++i)
+                {
+                    cout << edge_timestamps[i] << (i == edge_timestamps.size() - 1 ? "" : ",");
                 }
                 cout << "\n"; // Newline after each complete path entry
             }

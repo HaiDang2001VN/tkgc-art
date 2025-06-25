@@ -30,11 +30,12 @@ struct ShortestPathInfo
     std::vector<int> nodes;
     std::vector<int> node_types;
     std::vector<int> edge_types;
+    std::vector<int> edge_timestamps; // Added field for edge timestamps
 };
 
 struct MetaPathPattern
 {
-    std::vector<std::pair<int, int>> steps; // (edge_type, target_node_type)
+    std::vector<std::tuple<int, int, int>> steps; // (edge_type, target_node_type, timestamp)
 };
 
 // --- Utility Functions ---
@@ -162,6 +163,19 @@ std::unordered_map<int, ShortestPathInfo> load_shortest_paths(
         }
         if (!entry_valid) continue;
 
+        // Read edge timestamps if available
+        path_info.edge_timestamps.reserve(path_info.hops);
+        for (int i = 0; i < path_info.hops; ++i) {
+            int edge_timestamp_val;
+            if (!(file >> edge_timestamp_val)) {
+                log_stream << "[Error] " << getCurrentTimestamp() << " Warning: Failed to read edge_timestamp " << (i + 1) << "/" << path_info.hops
+                          << " for EID " << current_eid << " in " << txt_path << ". It will be set to -1." << std::endl;
+                edge_timestamp_val = -1; // Default value indicating missing timestamp
+            }
+            path_info.edge_timestamps.push_back(edge_timestamp_val);
+        }
+        if (!entry_valid) continue;
+
         if (entry_valid) {
             if (path_info.nodes.size() == static_cast<size_t>(path_info.hops + 1) &&
                 path_info.node_types.size() == static_cast<size_t>(path_info.hops + 1) &&
@@ -188,17 +202,19 @@ std::unordered_map<int, ShortestPathInfo> load_shortest_paths(
 MetaPathPattern extract_meta_path_pattern(const ShortestPathInfo &path_info, std::ofstream& log_stream)
 {
     MetaPathPattern pattern;
-    if (path_info.edge_types.size() != path_info.node_types.size() - 1)
+    if (path_info.edge_types.size() != path_info.node_types.size() - 1 ||
+        path_info.edge_types.size() != path_info.edge_timestamps.size())
     {
-        log_stream << "[Error] " << getCurrentTimestamp() << " Warning: Mismatched edge_types and node_types sizes in EID path info when extracting meta-path." << std::endl;
+        log_stream << "[Error] " << getCurrentTimestamp() << " Warning: Mismatched sizes in path info when extracting meta-path." << std::endl;
         return pattern;
     }
 
     for (size_t i = 0; i < path_info.edge_types.size(); ++i)
     {
         int edge_type = path_info.edge_types[i];
-        int target_node_type = path_info.node_types[i + 1]; 
-        pattern.steps.emplace_back(edge_type, target_node_type);
+        int target_node_type = path_info.node_types[i + 1];
+        int timestamp = path_info.edge_timestamps[i];
+        pattern.steps.emplace_back(edge_type, target_node_type, timestamp);
     }
     return pattern;
 }
@@ -255,7 +271,8 @@ std::vector<Path> beam_search_for_edge(
     const AdjacencyList &adj, const std::unordered_map<int, int> &node_to_type,
     const std::set<int> &direct_neighbors,
     const EmbeddingMap &node_embeddings, const EmbeddingMap &relation_embeddings,
-    const std::function<float(const std::vector<float> &, const std::vector<float> &, const std::vector<float> &)> &score_func)
+    const std::function<float(const std::vector<float> &, const std::vector<float> &, const std::vector<float> &)> &score_func,
+    const std::set<int> &true_path_nodes) // New parameter
 {
     std::vector<Path> current_beam;
     current_beam.push_back({u});
@@ -272,8 +289,8 @@ std::vector<Path> beam_search_for_edge(
         std::vector<std::pair<float, Path>> scored_candidates;
 
         // Get expected edge type and target node type from meta-path pattern
-        int expected_edge_type = pattern.steps[depth].first;
-        int expected_node_type = pattern.steps[depth].second;
+        int expected_edge_type = std::get<0>(pattern.steps[depth]);   // First element (edge_type)
+        int expected_node_type = std::get<1>(pattern.steps[depth]);   // Second element (target_node_type)
 
         for (const auto &path : current_beam)
         {
@@ -303,12 +320,16 @@ std::vector<Path> beam_search_for_edge(
                 int timestamp = rev_it->first;
                 int neighbor_node = rev_it->second;
 
+                // Skip if this node is in the true shortest path
+                if (true_path_nodes.count(neighbor_node) > 0)
+                    continue;
+
                 // Only exclude direct neighbors at the final step (depth == max_depth-1) 
                 // and only if the path has >= 2 hops
                 // if (exclude_direct_neighbors && depth == (max_depth - 1) && direct_neighbors.count(neighbor_node))
                 if (exclude_direct_neighbors && depth > 0 && direct_neighbors.count(neighbor_node))
                     continue;
-
+    
                 // Verify neighbor node type matches expected
                 if (node_to_type.count(neighbor_node) == 0 ||
                     node_to_type.at(neighbor_node) != expected_node_type)
@@ -551,9 +572,13 @@ int main(int argc, char *argv[])
             }
         }
 
+        const ShortestPathInfo& true_path_info = shortest_paths.at(eid);
+        std::set<int> true_path_nodes(true_path_info.nodes.begin(), true_path_info.nodes.end());
+
         auto found_paths = beam_search_for_edge(u_node, ts_val, beam_width, pattern, adj,
                                           node_to_type, direct_neighbors,
-                                          node_embeddings, relation_embeddings, score_func);
+                                          node_embeddings, relation_embeddings, score_func,
+                                          true_path_nodes);
         if (!found_paths.empty())
         {
             final_results[eid] = found_paths;

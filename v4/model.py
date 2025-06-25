@@ -210,7 +210,8 @@ class PathPredictor(LightningModule):
                     "distance": None,
                     "label": meta_info[0],  # Single label for this sample
                     "length": 0,
-                    "has_neg": False
+                    "has_neg": False,
+                    "loss": None
                 }
                 batch_items.append(item)
                 continue
@@ -219,6 +220,7 @@ class PathPredictor(LightningModule):
             
             slice_diff = diff[ptr:ptr + num_paths, :length]
             pos, neg = slice_diff[0], slice_diff[1:]
+            loss = None
             
             if neg.numel():
                 refs = slice_diff if self.hparams.positive_deviation else neg
@@ -228,15 +230,15 @@ class PathPredictor(LightningModule):
                 mean_z_pos = z_pos.mean()
                 
                 if self.hparams.chi2:
-                    # Chi-squared statistic from z-scores
-                    chi2_stat = torch.sum(z_pos**2)
+                    # Chi statistic from z-scores (L2 norm of z-score vector)
+                    chi_stat = torch.norm(z_pos)
                     
-                    # Degrees of freedom = hidden_dim of the model
-                    df = self.hparams.hidden_dim
+                    # Degrees of freedom = path length
+                    df = torch.tensor(length, device=self.device, dtype=torch.float)
                     
-                    # CDF of chi-squared distribution
-                    chi2_dist = torch.distributions.chi2.Chi2(df)
-                    cdf_val = chi2_dist.cdf(chi2_stat)
+                    # CDF of chi distribution
+                    chi_dist = torch.distributions.chi.Chi(df)
+                    cdf_val = chi_dist.cdf(chi_stat)
                     percentile_pos = 1 - cdf_val.item()
                 else:
                     # Convert mean z-score to percentile for positive sample using normal CDF
@@ -255,7 +257,8 @@ class PathPredictor(LightningModule):
                 'neg_dist': neg.detach().cpu().numpy() if neg.numel() > 0 else None,  # Distances for negative samples
                 'length': length,  # Path length for this sample
                 'label': label,  # Label for this sample
-                'has_neg': neg.numel() > 0
+                'has_neg': neg.numel() > 0,
+                'loss': loss.item() if loss else None  # Loss for this sample'
             }
             batch_items.append(item)
             ptr += num_paths
@@ -286,11 +289,13 @@ class PathPredictor(LightningModule):
         pos_losses = []
         neg_losses = []
         for output in outputs:
-            if output and 'loss' in output and output['loss'] is not None and 'item' in output:
-                if output['item']['label'] == 1:
-                    pos_losses.append(output['loss'])
-                elif output['item']['label'] == 0:
-                    neg_losses.append(output['loss'])
+            if output and 'loss' in output and output['loss'] is not None and 'items' in output:
+                for item in output['items']:
+                    if 'loss' in item and item['loss'] is not None:
+                        if item['label'] == 1:
+                            pos_losses.append(item['loss'])
+                        elif item['label'] == 0:
+                            neg_losses.append(item['loss'])
         
         if pos_losses:
             pos_epoch_loss = torch.stack(pos_losses).mean()
@@ -320,11 +325,14 @@ class PathPredictor(LightningModule):
         # Extract and organize values for evaluation
         scores, lengths, labels, has_neg, pos_dist, neg_dists = [], [], [], [], [], []
         
+        max_hops = self.hparams.max_hops
+        max_adjust = self.hparams.get('max_adjust', 1.0)
+        
         for output in outputs:
             if output and 'items' in output:
                 for item in output['items']:
                     scores.append(item['score'])
-                    lengths.append(item.get('length', 0))
+                    lengths.append(item.get('length', max_hops + 2))
                     labels.append(item['label'])
                     has_neg.append(item.get('has_neg', False))
                     pos_dist.append(item.get('pos_dist', None))
@@ -338,9 +346,6 @@ class PathPredictor(LightningModule):
         lengths = torch.tensor(lengths)
         labels = torch.tensor(labels)
         has_neg = torch.tensor(has_neg)
-        
-        max_hops = self.hparams.max_hops
-        max_adjust = self.hparams.get('max_adjust', 1.0)
         
         min_len = lengths.min() if lengths.numel() > 0 else 0
         ratios = 1 - ((lengths.float() - min_len) / (max_hops - min_len + 1)) # max_hops = max length - 1

@@ -5,6 +5,7 @@
   "train_ratio": 0.3,
   "hidden_dim": 128,
   "max_hops": 4,
+  "num_neg": 50,
   "num_threads": "vast",
   "max_epochs": 10,
   "batch_size": "vast",
