@@ -207,12 +207,9 @@ class PathPredictor(LightningModule):
         for meta_info in meta:
             if len(meta_info) == 1:
                 item = {
-                    "score": 0,
-                    "distance": None,
+                    "score": 0.0,
+                    "length": None,
                     "label": meta_info[0],  # Single label for this sample
-                    "length": 0,
-                    "has_neg": False,
-                    "loss": None
                 }
                 batch_items.append(item)
                 continue
@@ -223,7 +220,7 @@ class PathPredictor(LightningModule):
             pos, neg = slice_diff[0], slice_diff[1:]
             loss = None
             
-            if neg.numel():
+            if neg.numel() > 0:
                 refs = slice_diff if self.hparams.positive_deviation else neg
                 
                 mean, std = refs.mean(0), refs.std(0, correction=0)
