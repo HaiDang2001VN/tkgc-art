@@ -2,6 +2,7 @@
   "dataset": "icews18",
   "storage_dir": "../data/",
   "embedding_config": "./embedding_config.json",
+  "criteria": "score",
   "train_ratio": 0.3,
   "hidden_dim": 256,
   "max_hops": 4,

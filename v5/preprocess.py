@@ -27,7 +27,7 @@ def run_preprocess_thread(args_tuple: tuple) -> dict:
     Captures its stdout (JSON) and returns it as a Python dictionary.
     """
     (binary_path, dataset_name, partition, model_name, 
-     beam_width, storage_dir, total_num_threads_for_cpp, current_thread_id_for_cpp) = args_tuple
+     beam_width, storage_dir, total_num_threads_for_cpp, current_thread_id_for_cpp, criteria) = args_tuple
 
     cmd = [
         binary_path,
@@ -37,7 +37,8 @@ def run_preprocess_thread(args_tuple: tuple) -> dict:
         str(beam_width),
         storage_dir,
         str(total_num_threads_for_cpp),
-        str(current_thread_id_for_cpp)
+        str(current_thread_id_for_cpp),
+        criteria
     ]
     
     process_results = {}
@@ -118,6 +119,7 @@ def main():
         sys.exit(1)
 
     beam_width = config.get('beam_width', config.get('num_neg', 20)) 
+    criteria = config.get('criteria', 'score')  # Default to 'score' if not specified
 
     if not dataset_name:
         print("[Error] Python orchestrator: 'dataset' not found in config.", file=sys.stderr)
@@ -126,12 +128,17 @@ def main():
     if not os.path.exists(cli_args.binary):
         print(f"[Error] Python orchestrator: C++ binary not found at {cli_args.binary}", file=sys.stderr)
         sys.exit(1)
+    
+    # Validate criteria
+    if criteria not in ['score', 'time']:
+        print(f"[Error] Python orchestrator: Invalid criteria '{criteria}'. Must be 'score' or 'time'.", file=sys.stderr)
+        sys.exit(1)
 
     tasks_to_run_count = cli_args.sampling if cli_args.sampling is not None else num_threads_config
     tasks_to_run_count = min(tasks_to_run_count, num_threads_config) 
     pool_size = tasks_to_run_count 
 
-    print(f"[Info] Python orchestrator: Dataset: {dataset_name}, Partition: {cli_args.partition}, Model: {model_name}", file=sys.stderr)
+    print(f"[Info] Python orchestrator: Dataset: {dataset_name}, Partition: {cli_args.partition}, Model: {model_name}, Criteria: {criteria}", file=sys.stderr)
     print(f"[Info] Python orchestrator: Total conceptual data shards (num_threads for C++): {num_threads_config}", file=sys.stderr)
     print(f"[Info] Python orchestrator: Number of shards to process (C++ instances to run): {tasks_to_run_count}", file=sys.stderr)
     print(f"[Info] Python orchestrator: Concurrent C++ processes (Python Pool size): {pool_size}", file=sys.stderr)
@@ -147,7 +154,8 @@ def main():
             beam_width,
             storage_dir,
             num_threads_config,      
-            current_task_thread_id   
+            current_task_thread_id,
+            criteria
         )
         tasks_args_list.append(task_args)
 

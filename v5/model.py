@@ -49,6 +49,19 @@ class PositionalEncoding(nn.Module):
 
 
 class PathPredictor(LightningModule):
+    """
+    PathPredictor model that supports both legacy and new prediction formats.
+    
+    The model now supports:
+    1. Legacy prediction (_predict): Uses causal masking for sequence-to-sequence prediction
+    2. New prediction (_predict_new): Uses non-causal transformer to score path prefixes
+    
+    New features added:
+    - score_proj: Linear layer that maps embeddings to single scores
+    - Non-causal forward pass option
+    - Prefix-length-grouped batch processing
+    - Z-score calculation across prefix lengths
+    """
     def __init__(
         self,
         emb_dim: int,
@@ -100,105 +113,136 @@ class PathPredictor(LightningModule):
         self.output_proj = nn.Linear(
             self.hparams.hidden_dim, self.hparams.emb_dim)
         
+        # Add scoring layer for single score prediction
+        self.score_proj = nn.Linear(self.hparams.emb_dim, 1)
+        
         # valid and test step outputs
         self.validation_step_outputs = []
         self.test_step_outputs = []
 
-    def forward(self, src_emb: torch.Tensor) -> torch.Tensor:
+    def forward(self, src_emb: torch.Tensor, use_causal_mask: bool = True) -> torch.Tensor:
         h = self.input_proj(src_emb)
         h = self.pos_encoder(h)
         
-        # Generate causal mask for the sequence length
-        seq_len = h.size(1)
-        causal_mask = nn.Transformer.generate_square_subsequent_mask(
-            seq_len, device=h.device
-        )
-        
-        # Pass the mask to the transformer instead of is_causal=True
-        h = self.transformer(h, mask=causal_mask)
+        # Generate causal mask for the sequence length only if requested
+        if use_causal_mask:
+            seq_len = h.size(1)
+            causal_mask = nn.Transformer.generate_square_subsequent_mask(
+                seq_len, device=h.device
+            )
+            # Pass the mask to the transformer
+            h = self.transformer(h, mask=causal_mask)
+        else:
+            # No mask for non-causal prediction
+            h = self.transformer(h)
+            
         pred_emb = self.output_proj(h)
         return pred_emb
 
-    def _predict(self, batch: list[dict]):
-        # This method combines the logic of _prepare_batch and the original _predict
-        all_emb = []
-        meta_info = []
-        for sample in batch:
-            if 'paths' not in sample or not sample['paths']:
-                meta_info.append((sample["label"],))
-                continue
-
-            paths = sample['paths']
-            num_paths = len(paths)
-            max_len = max(len(p) for p in paths) if num_paths else 0
-            
-            # Check if we have embeddings and this is a valid path
-            if 'shallow_emb' in sample:
-                # Get the edge type embedding for the current edge
-                type_emb = sample.get('type_embedding', None)
-                
-                # Get information for loss calculation and evaluation
-                meta_info.append((num_paths, max_len - 1, sample["label"]))
-                
-                for idx in range(num_paths):
-                    node_embs = sample['shallow_emb'][idx]
-                    edge_embs = sample['edge_emb'][idx] if 'edge_emb' in sample else None
-                    
-                    # Create a new sequence that starts with type_embedding followed by 
-                    # alternating node and edge embeddings: [type, u, r1, n1, r2, n2, ...]
-                    integrated_emb = []
-                    
-                    # 1. Start with the type embedding if available
-                    if type_emb is not None:
-                        integrated_emb.append(type_emb)
-                    
-                    # 2. First node embedding (u)
-                    if len(node_embs) > 0:
-                        integrated_emb.append(node_embs[0])
-                    
-                    # 3. Alternate between edge and node embeddings
-                    for i in range(len(node_embs) - 1):
-                        # Add edge embedding if available
-                        if edge_embs is not None and i < len(edge_embs):
-                            integrated_emb.append(edge_embs[i])
-                        # Add the next node
-                        integrated_emb.append(node_embs[i + 1])
-                    
-                    # Convert list to tensor and add features if they exist
-                    if integrated_emb:
-                        emb = torch.stack(integrated_emb)
-                        
-                        if sample.get('features') is not None:
-                            feat = sample['features'][idx]
-                            # Modify this to handle the larger sequence
-                            if len(emb) == len(feat):
-                                emb = torch.cat([emb, feat], dim=-1)
-                        
-                        all_emb.append(emb)
-    
-        if not all_emb:
-            # No paths found in the batch, return None for diff but keep meta_info
-            return None, meta_info
-
-        # The source is everything except the last element in the sequence
-        # Target is everything except the first element in the sequence
-        src_seq = [e[:-1] for e in all_emb]
-        tgt_seq = [e[1:] for e in all_emb]
+    def _predict(self, batch):
+        """
+        Prediction function that handles prefix-length-grouped batch format from the new collate function.
         
-        src_emb = pad_sequence(src_seq, batch_first=True, padding_value=0.0, padding_side="right").detach()
-        tgt_emb = pad_sequence(tgt_seq, batch_first=True, padding_value=0.0, padding_side="right").detach()
+        Args:
+            batch: dict: {prefix_length: [node_embeddings, edge_embeddings, meta]} from collate_by_prefix_length
+        
+        Returns:
+            z_scores tensor and meta_info for scoring approach
+        """
+        # Collection for tracking unique samples and their scores
+        all_samples = []  # List of unique samples identified by (u, v, ts)
+        sample_to_prefix_scores = {}  # sample_idx -> {prefix_len -> scores}
+        
+        # Sort prefix lengths to process from shorter to longer
+        sorted_prefix_lengths = sorted(batch.keys())
+        
+        # First pass: collect all unique samples from meta_data across all prefix lengths
+        seen_samples = set()
+        for prefix_len in sorted_prefix_lengths:
+            if not batch[prefix_len] or len(batch[prefix_len]) < 3:  # Empty result or incomplete data
+                continue
+                
+            # Unpack the batch components
+            _, _, meta_data = batch[prefix_len]
+            
+            # Process each sample's metadata
+            for sample_meta in meta_data:
+                # Create a unique key for this sample
+                u = sample_meta.get('u', -1).item() if hasattr(sample_meta.get('u', -1), 'item') else sample_meta.get('u', -1)
+                v = sample_meta.get('v', -1).item() if hasattr(sample_meta.get('v', -1), 'item') else sample_meta.get('v', -1)
+                ts = sample_meta.get('ts', -1).item() if hasattr(sample_meta.get('ts', -1), 'item') else sample_meta.get('ts', -1)
+                sample_key = (u, v, ts)
+                
+                if sample_key not in seen_samples:
+                    seen_samples.add(sample_key)
+                    all_samples.append(sample_meta)  # Store the full metadata for this sample
+        
+        outputs = {}
+        
+        # Process each prefix length
+        for prefix_len in sorted_prefix_lengths:
+            if not batch[prefix_len] or len(batch[prefix_len]) < 3:  # Empty result or incomplete data
+                continue
+                
+            # Unpack the batch components
+            node_embeddings, edge_embeddings, meta_data = batch[prefix_len]
+            
+            # Skip if no embeddings
+            if node_embeddings.numel() == 0:
+                continue
+                
+            # Create tensor of type_embedding along the node_embeddings
+            type_embeddings = []
+            num_paths = []
+            
+            for sample_meta in meta_data:
+                type_embedding = sample_meta.get('type_embedding', None)
+                num_paths.append(sample_meta.get('num_paths', 1))
+                if type_embedding is not None:
+                    type_embeddings.append([type_embedding] * num_paths[-1])
 
-        try:
-            pred_emb = self(src_emb)
-            diff = self.norm_fn(pred_emb - tgt_emb, dim=-1)
-        except TypeError as e:
-            print(f"Error during prediction: {e} with src_emb: {type(src_emb)}, tgt_emb: {type(tgt_emb)}")
-            print(f"src_emb shape: {src_emb.shape}, tgt_emb shape: {tgt_emb.shape}")
-            diff = None
-            meta_info = None
+            if not type_embeddings:
+                # No type embeddings available, skip this prefix length
+                continue
+            
+            type_embeddings = torch.stack(type_embeddings, dim=0)
+            edge_embeddings = torch.cat([type_embeddings, edge_embeddings], dim=1)
+            
+            # Create interleaved edge-node embeddings
+            batch_size, length, emb_dim = node_embeddings.size()
+            embeddings = torch.empty(batch_size, length, emb_dim, dtype=node_embeddings.dtype,
+                                        device=node_embeddings.device)
+            
+            # Edge embeddings start first
+            embeddings[:, 0::2, :] = edge_embeddings
+            embeddings[:, 1::2, :] = node_embeddings
+            
+            # Prediction with gradient
+            pred_emb = self.forward(embeddings, use_causal_mask=False)
+            pred_scores = self.score_proj(pred_emb[:, 0, :])
+            
+            cur_idx = 0
+            z_scores = []
+            for num_path in num_paths:
+                # Get the current sample's prefix scores
+                scores = pred_scores[cur_idx:cur_idx + num_path]
+                cur_idx += num_path
+                
+                mean, std = scores.mean(0), scores.std(0, correction=0)
+                z = (scores[0] - mean)/(std+1e-8)
+                z_scores.append(z)
+                
+            # Stack z_scores into single torch tensor
+            z_scores = torch.stack(z_scores)
+            
+            # Create unified outputs from z_scores and meta
+            outputs[prefix_len] = {
+                'z_scores': z_scores,
+                'meta': meta_data
+            }
+        
+        return outputs
     
-        return diff, meta_info
-
     def training_step(self, batch, batch_idx):
         diff, meta = self._predict(batch)
         
@@ -461,6 +505,33 @@ class PathPredictor(LightningModule):
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
 
+    def predict(self, batch):
+        """
+        Public method for prediction that returns z_scores and meta_info.
+        
+        Args:
+            batch: dict: {prefix_length: [list of samples]} from collate_by_prefix_length
+            
+        Returns:
+            z_scores tensor and meta_info
+        """
+        return self._predict(batch)
+
+# Example usage of the new prediction format:
+#
+# # For prefix-grouped batch format:
+# batch_dict = {
+#     "2": [sample1, sample2],  # samples with prefix length 2
+#     "3": [sample1, sample3],  # samples with prefix length 3
+# }
+# z_scores, meta = model.predict_with_new_format(batch_dict)
+# 
+# # For legacy list format:
+# batch_list = [sample1, sample2, sample3]
+# z_scores, meta = model.predict_with_new_format(batch_list)
+#
+# # z_scores will be a tensor of shape (num_unique_samples,) 
+# # containing z-scores for each sample
 
 def main():
     # Set start method to 'spawn' before any other multiprocessing code runs

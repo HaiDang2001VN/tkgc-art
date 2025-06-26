@@ -16,9 +16,124 @@ import requests  # Add this import at the top if not present
 from embedding import KGEModelProxy
 
 
-# Custom collate function remains unchanged
-def collate_to_list(batch: list[dict]) -> list[dict]:
-    return batch
+# Custom collate function that groups samples by prefix length
+def collate_by_prefix_length(batch: list[dict]) -> dict:
+    """
+    Collates batches by prefix length and returns a dict mapping:
+    prefix_length -> [node_embeddings, edge_embeddings, meta]
+    
+    Where:
+    - node_embeddings is a tensor containing all node embeddings (positive + negative) for this prefix
+    - edge_embeddings is a tensor containing all edge embeddings (positive + negative) for this prefix
+    - meta is a list of dicts with metadata for each sample, including:
+        - num_paths: number of paths (1 positive + negatives) for this sample
+        - u, v, ts, label, edge_type, type_embedding: original sample data
+    """
+    # Collect all unique prefix lengths across all samples
+    all_prefix_lengths = set()
+    for item in batch:
+        if 'negs_by_prefix_length' in item:
+            all_prefix_lengths.update(item['negs_by_prefix_length'].keys())
+    
+    result = {}
+    
+    for prefix_len in all_prefix_lengths:
+        valid_samples = []
+        
+        # First pass: identify valid samples for this prefix length
+        for item in batch:
+            if ('negs_by_prefix_length' in item and 
+                prefix_len in item['negs_by_prefix_length'] and 
+                item['negs_by_prefix_length'][prefix_len] and
+                'pos_node_embs' in item and item['pos_node_embs'] is not None):
+                valid_samples.append(item)
+        
+        if not valid_samples:
+            continue
+            
+        # Lists to collect all embeddings for this prefix length
+        all_node_embs = []
+        all_edge_embs = []
+        meta_data = []
+        
+        # Process each sample
+        for item in valid_samples:
+            # Get positive path embeddings and trim them to match the prefix length
+            pos_node_embs = item['pos_node_embs']
+            pos_edge_embs = item['pos_edge_embs'] if 'pos_edge_embs' in item else None
+            
+            # Trim positive embeddings to match the prefix length for fair comparison
+            if pos_node_embs is not None and pos_node_embs.size(0) > prefix_len:
+                # Keep only the prefix part of the positive path
+                pos_node_embs = pos_node_embs[:prefix_len]
+                
+            if pos_edge_embs is not None and pos_edge_embs.size(0) > (prefix_len - 1):
+                # For edges, we need prefix_len-1 edges to connect prefix_len nodes
+                pos_edge_embs = pos_edge_embs[:prefix_len-1]
+            
+            # Get negative path embeddings for this prefix length
+            neg_node_embs = item['neg_node_embs_by_prefix'].get(prefix_len, [])
+            neg_edge_embs = item['neg_edge_embs_by_prefix'].get(prefix_len, [])
+            
+            # Add assertions to verify the trimmed embeddings match the expected structure
+            if pos_node_embs is not None and neg_node_embs:
+                # After trimming, pos_node_embs should have exactly prefix_len nodes
+                assert pos_node_embs.size(0) == prefix_len, f"Positive node embeddings should have length {prefix_len}, got {pos_node_embs.size(0)}"
+                
+                # Each negative path should also have prefix_len nodes
+                for neg_emb in neg_node_embs:
+                    assert neg_emb.size(0) == prefix_len, f"Negative node embeddings should have length {prefix_len}, got {neg_emb.size(0)}"
+            
+            if pos_edge_embs is not None and neg_edge_embs:
+                # After trimming, pos_edge_embs should have exactly prefix_len-1 edges
+                assert pos_edge_embs.size(0) == prefix_len-1, f"Positive edge embeddings should have length {prefix_len-1}, got {pos_edge_embs.size(0)}"
+                
+                # Each negative path should also have prefix_len-1 edges
+                for neg_emb in neg_edge_embs:
+                    if neg_emb.size(0) > 0:  # Only check if there are edge embeddings
+                        assert neg_emb.size(0) == prefix_len-1, f"Negative edge embeddings should have length {prefix_len-1}, got {neg_emb.size(0)}"
+            
+            # Combine positive and negative embeddings for this sample
+            sample_node_embs = [pos_node_embs] + neg_node_embs
+            sample_edge_embs = [pos_edge_embs] + neg_edge_embs if pos_edge_embs is not None else neg_edge_embs
+            
+            # Add to the collection
+            all_node_embs.extend(sample_node_embs)
+            all_edge_embs.extend(sample_edge_embs)
+            
+            # Create metadata entry for this sample with the adjusted path length
+            # Since pos_node_embs is already trimmed, we can directly use its length
+            meta = {
+                'num_paths': len(sample_node_embs),
+                'pos_path_length': pos_node_embs.size(0) if pos_node_embs is not None else 0
+            }
+            
+            # Add edge information to metadata
+            for key in ['label', 'u', 'v', 'ts', 'edge_type', 'type_embedding']:
+                if key in item:
+                    meta[key] = item[key]
+                    
+            meta_data.append(meta)
+        
+        # Stack all embeddings into a single tensor
+        # Since we've ensured all embeddings have the same length for this prefix,
+        # we can stack directly without checking or padding
+        if all_node_embs:
+            # All node embeddings should have the same shape: [prefix_len, embedding_dim]
+            node_embeddings = torch.stack(all_node_embs)
+        else:
+            node_embeddings = torch.tensor([])
+        
+        # Similarly for edge embeddings - all should have shape [prefix_len-1, embedding_dim]
+        if all_edge_embs:
+            edge_embeddings = torch.stack(all_edge_embs)
+        else:
+            edge_embeddings = torch.tensor([])
+        
+        # Store in result
+        result[prefix_len] = [node_embeddings, edge_embeddings, meta_data]
+    
+    return result
 
 
 class EdgeDataset(Dataset):
@@ -71,110 +186,138 @@ class EdgeDataset(Dataset):
             item['ts'] = torch.tensor(self.df.at[eid, 'timestamp'], dtype=torch.long)
         
         # Extract edge type and its embedding if available
-        if 'edge_type' in self.df.columns and self.kge_proxy is not None:
+        # edge_type = None
+        if 'edge_type' in self.df.columns:
             edge_type = int(self.df.at[eid, 'edge_type'])
-            # Add the edge type as a tensor
             item['edge_type'] = torch.tensor(edge_type, dtype=torch.long)
+        
+        if pos_nodes is None: # If no positive path, skip this item
+            return item # Still returns the label in order for later evaluation if needed
+        
+        # Get negative paths from tree-like format
+        raw_neg_tree_data = self.neg_paths.get(str(eid), {})
+        
+        # Process only tree-like format data
+        negs_by_prefix_length = {}  # prefix_length -> list of negative paths
+        neg_edge_types_by_prefix_length = {}
+        neg_timestamps_by_prefix_length = {}
+        
+        # Process tree-like negative data
+        for prefix_len_str, candidates in raw_neg_tree_data.items():
+            prefix_len = int(prefix_len_str)
             
-            # Extract the embedding for this edge type if KGE proxy has relation embeddings
-            if hasattr(self.kge_proxy.model, 'rel_emb') and self.kge_proxy.model.rel_emb is not None:
-                # Get device of KGE proxy model
-                device = next(self.kge_proxy.model.parameters()).device
-                
-                # Get embedding for this edge type
+            prefix_negs_nodes = []
+            prefix_negs_edge_types = []
+            prefix_neg_timestamps = []
+            
+            # For each candidate at this prefix length
+            for candidate in candidates:
+                if isinstance(candidate, list) and len(candidate) == 2:
+                    node_id, timestamp = candidate
+                    
+                    # Reconstruct the path: take first prefix_len nodes from positive path
+                    # and replace the last node with the candidate
+                    if pos_nodes and len(pos_nodes) >= prefix_len:
+                        neg_path = pos_nodes[:prefix_len] + [node_id]
+                        # Edge types: take first prefix_len-1 edge types from positive path
+                        neg_edge_types = pos_edge_types[:prefix_len-1] if pos_edge_types and len(pos_edge_types) >= prefix_len-1 else []
+                        # Timestamps: take first prefix_len-1 edge timestamps from positive path, then add the new timestamp
+                        neg_path_timestamps = (pos_edge_timestamps[:prefix_len-1] + [timestamp]) if pos_edge_timestamps and len(pos_edge_timestamps) >= prefix_len-1 else [timestamp]
+                        
+                        prefix_negs_nodes.append(neg_path)
+                        prefix_negs_edge_types.append(neg_edge_types)
+                        prefix_neg_timestamps.append(neg_path_timestamps)
+            
+            if prefix_negs_nodes:  # Only store if we have valid negative paths for this prefix length
+                negs_by_prefix_length[prefix_len] = prefix_negs_nodes
+                neg_edge_types_by_prefix_length[prefix_len] = prefix_negs_edge_types
+                neg_timestamps_by_prefix_length[prefix_len] = prefix_neg_timestamps
+        
+        # Store the prefix-length grouped data in the item
+        item['negs_by_prefix_length'] = negs_by_prefix_length
+        item['neg_edge_types_by_prefix_length'] = neg_edge_types_by_prefix_length
+        item['neg_timestamps_by_prefix_length'] = neg_timestamps_by_prefix_length
+        
+        # Store positive path info separately for easier access
+        item['pos_path'] = pos_nodes
+        item['pos_edge_types'] = pos_edge_types
+        item['pos_timestamps'] = pos_edge_timestamps
+        
+        # --- GROUP ALL KGE PROXY ACCESS TOGETHER HERE ---
+        if self.kge_proxy is not None:
+            # Get device of KGE proxy model for intermediate operations
+            device = next(self.kge_proxy.model.parameters()).device
+            emb_dim = self.kge_proxy.model.node_emb.weight.size(1)
+            
+            # 1. First extract edge type embedding if available
+            if edge_type is not None and hasattr(self.kge_proxy.model, 'rel_emb') and self.kge_proxy.model.rel_emb is not None:
                 with torch.no_grad():
                     edge_type_tensor = torch.tensor([edge_type], dtype=torch.long, device=device)
                     type_embedding = self.kge_proxy.model.rel_emb(edge_type_tensor)
                     # Move to CPU and remove batch dimension
                     item['type_embedding'] = type_embedding.cpu()[0]
-        
-        if pos_nodes is None: # If no positive path, skip this item
-            return item # Still returns the label in order for later evaluation if needed
-        
-        # Get negative paths and their timestamps
-        raw_neg_interleaved_paths = self.neg_paths.get(str(eid), [])
-        raw_neg_timestamps = self.neg_path_timestamps.get(str(eid), [])
-        
-        # No sampling - use all negative paths
-        
-        negs_nodes_only = []
-        negs_edge_types_only = []
-        for p_interleaved in raw_neg_interleaved_paths:
-            # Extract nodes (elements at even indices)
-            # e.g., [n0, r1, n1, r2, n2] -> [n0, n1, n2]
-            nodes_in_path = p_interleaved[::2]
-            negs_nodes_only.append(nodes_in_path)
             
-            # Extract edge types (elements at odd indices)
-            # e.g., [n0, r1, n1, r2, n2] -> [r1, r2]
-            edge_types_in_path = p_interleaved[1::2]
-            negs_edge_types_only.append(edge_types_in_path)
+            # 2. Process positive path embeddings
+            pos_node_embs = None
+            pos_edge_embs = None
             
-        # all_paths will be a list of (list of node_ids)
-        # e.g., [[pos_n1, pos_n2], [neg1_n1, neg1_n2, neg1_n3], [neg2_n1, neg2_n2]]
-        all_paths_nodes_only = [pos_nodes] + negs_nodes_only
-        
-        # all_edge_types will be a list of (list of edge_type_ids)
-        # e.g., [[pos_r1, pos_r2], [neg1_r1, neg1_r2], [neg2_r1, neg2_r2]]
-        all_paths_edge_types = [pos_edge_types] + negs_edge_types_only
-        
-        # Combine timestamps for all paths
-        all_path_timestamps = [pos_edge_timestamps] + list(raw_neg_timestamps)
-
-        # Store paths and timestamps as a list of lists of integers
-        item['paths'] = all_paths_nodes_only
-        item['path_timestamps'] = all_path_timestamps
-        
-        if self.kge_proxy is not None:
-            embs_for_all_paths = [] # This will be a list of tensors
-            edge_embs_for_all_paths = [] # This will be a list of tensors for edge type embeddings
-            # Get device of KGE proxy model for intermediate operations
-            device = next(self.kge_proxy.model.parameters()).device
-            
-            for node_list_for_one_path, edge_types_for_one_path in zip(all_paths_nodes_only, all_paths_edge_types):
-                # Get embedding dimension from the model
-                emb_dim = self.kge_proxy.model.node_emb.weight.size(1)
-                
-                if not node_list_for_one_path:
-                    # For empty paths, add empty tensors to maintain structure
-                    embs_for_all_paths.append(torch.empty(0, emb_dim))
-                    edge_embs_for_all_paths.append(torch.empty(0, emb_dim))
-                    continue
-
+            if pos_nodes:
                 # Create node_ids_tensor on the same device as the KGE model
-                node_ids_tensor = torch.tensor(node_list_for_one_path, dtype=torch.long, device=device)
+                pos_node_tensor = torch.tensor(pos_nodes, dtype=torch.long, device=device)
                 
-                # Wrap the embedding extraction in no_grad context:
+                # Extract embeddings with no_grad
                 with torch.no_grad():
-                    # kge_proxy.model.node_emb should return a tensor of shape (path_len, kge_dim)
-                    path_kge_embs_tensor = self.kge_proxy.model.node_emb(node_ids_tensor)
+                    # Get positive path node embeddings
+                    pos_node_embs = self.kge_proxy.model.node_emb(pos_node_tensor).cpu()
                     
-                    # Move embeddings to CPU before adding to list
-                    path_kge_embs_tensor = path_kge_embs_tensor.cpu()
-                    embs_for_all_paths.append(path_kge_embs_tensor)
-                    
-                    # Extract edge type embeddings if edge types exist and model has rel_emb
-                    if edge_types_for_one_path and hasattr(self.kge_proxy.model, 'rel_emb') and self.kge_proxy.model.rel_emb is not None:
-                        # Create edge_types_tensor on the same device as the KGE model
-                        edge_types_tensor = torch.tensor(edge_types_for_one_path, dtype=torch.long, device=device)
-                        
-                        # Extract edge type embeddings
-                        path_edge_embs_tensor = self.kge_proxy.model.rel_emb(edge_types_tensor)
-                        
-                        # Move embeddings to CPU before adding to list
-                        path_edge_embs_tensor = path_edge_embs_tensor.cpu()
-                        edge_embs_for_all_paths.append(path_edge_embs_tensor)
+                    # Get positive path edge embeddings if available
+                    if pos_edge_types and hasattr(self.kge_proxy.model, 'rel_emb') and self.kge_proxy.model.rel_emb is not None:
+                        pos_edge_tensor = torch.tensor(pos_edge_types, dtype=torch.long, device=device)
+                        pos_edge_embs = self.kge_proxy.model.rel_emb(pos_edge_tensor).cpu()
                     else:
-                        # If no edge types or no rel_emb, add empty tensor to maintain structure
-                        edge_embs_for_all_paths.append(torch.empty(0, emb_dim))
+                        pos_edge_embs = torch.empty(0, emb_dim)
             
-            # item['shallow_emb'] is a list of tensors, e.g. [(path1_len, kge_dim), (path2_len, kge_dim)]
-            item['shallow_emb'] = embs_for_all_paths
+            # Store positive path embeddings
+            item['pos_node_embs'] = pos_node_embs
+            item['pos_edge_embs'] = pos_edge_embs
             
-            # item['edge_emb'] is a list of tensors for edge type embeddings
-            # Each tensor has shape (num_edges_in_path, kge_dim)
-            # Number of edge embeddings = number of edges in path = number of nodes - 1
-            item['edge_emb'] = edge_embs_for_all_paths
+            # 3. Process negative path embeddings per prefix length
+            neg_node_embs_by_prefix = {}
+            neg_edge_embs_by_prefix = {}
+            
+            for prefix_len, neg_paths in negs_by_prefix_length.items():
+                prefix_node_embs = []
+                prefix_edge_embs = []
+                
+                for i, neg_path in enumerate(neg_paths):
+                    if not neg_path:
+                        prefix_node_embs.append(torch.empty(0, emb_dim))
+                        prefix_edge_embs.append(torch.empty(0, emb_dim))
+                        continue
+                    
+                    # Create tensor on device
+                    neg_node_tensor = torch.tensor(neg_path, dtype=torch.long, device=device)
+                    
+                    with torch.no_grad():
+                        # Get negative path node embeddings
+                        neg_node_emb = self.kge_proxy.model.node_emb(neg_node_tensor).cpu()
+                        prefix_node_embs.append(neg_node_emb)
+                        
+                        # Get negative path edge embeddings if available
+                        neg_edge_types = neg_edge_types_by_prefix_length.get(prefix_len, [])[i]
+                        if neg_edge_types and hasattr(self.kge_proxy.model, 'rel_emb') and self.kge_proxy.model.rel_emb is not None:
+                            neg_edge_tensor = torch.tensor(neg_edge_types, dtype=torch.long, device=device)
+                            neg_edge_emb = self.kge_proxy.model.rel_emb(neg_edge_tensor).cpu()
+                            prefix_edge_embs.append(neg_edge_emb)
+                        else:
+                            prefix_edge_embs.append(torch.empty(0, emb_dim))
+                
+                neg_node_embs_by_prefix[prefix_len] = prefix_node_embs
+                neg_edge_embs_by_prefix[prefix_len] = prefix_edge_embs
+            
+            # Store negative path embeddings
+            item['neg_node_embs_by_prefix'] = neg_node_embs_by_prefix
+            item['neg_edge_embs_by_prefix'] = neg_edge_embs_by_prefix
             
         return item
 
@@ -237,7 +380,7 @@ class PathDataModule(LightningDataModule):
             self.filter_splits = [self.filter_splits]
         self.embedding_used = cfg.get('embedding', None)
         self.test_time = False  # Flag to indicate if this is test time
-    
+        
         # Internal shallow flag
         self._use_shallow = cfg.get('shallow', False)
         self.df = None
@@ -245,7 +388,6 @@ class PathDataModule(LightningDataModule):
         self.data = {}
         self.pos_paths = {}
         self.neg_paths = {}
-        self.neg_path_timestamps = {}
         self.kge_proxy = {}
         self.features_map = {}
 
@@ -311,19 +453,11 @@ class PathDataModule(LightningDataModule):
                 
                 raw_neg_data = json.load(open(neg_fn))
                 neg_paths = {}
-                neg_path_timestamps = {}
                 for eid, data in raw_neg_data.items():
-                    # New format: {"eid": {"paths": [...], "timestamps": [...]}}
-                    if isinstance(data, dict) and "paths" in data:
-                        neg_paths[eid] = data.get("paths", [])
-                        neg_path_timestamps[eid] = data.get("timestamps", [])
-                    else:
-                        # Fallback for old format: {"eid": [...]}
-                        neg_paths[eid] = data
-                        neg_path_timestamps[eid] = []
+                    # Assume tree-like format (no format checking)
+                    neg_paths[eid] = data
                 
                 self.neg_paths[split] = neg_paths
-                self.neg_path_timestamps[split] = neg_path_timestamps
 
                 # Check if this split should be pre-scanned
                 if split in self.filter_splits:
@@ -387,6 +521,7 @@ class PathDataModule(LightningDataModule):
             self.neg_path_timestamps[split],
             self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg
         )
+        
         return DataLoader(
             ds, 
             batch_size=self.batch_size, 
@@ -394,7 +529,7 @@ class PathDataModule(LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             persistent_workers=self.num_workers > 0,  # Only enable when using workers
-            collate_fn=collate_to_list
+            collate_fn=collate_by_prefix_length
         )
 
     def train_dataloader(self):
@@ -444,9 +579,10 @@ class PathDataModule(LightningDataModule):
             # Check negative paths
             has_valid_neg = False
             if eid in self.neg_paths[split]:
-                if self.neg_paths[split][eid]:  # Check if the list is not empty
-                    has_valid_neg = True
-                else:
+                neg_data = self.neg_paths[split][eid]
+                # Tree-like format: check if any prefix has candidates
+                has_valid_neg = any(candidates for candidates in neg_data.values())
+                if not has_valid_neg:
                     result["empty_neg"] = 1
             else:
                 result["missing_neg"] = 1

@@ -265,148 +265,100 @@ float score_rotate(const std::vector<float> &h, const std::vector<float> &r, con
     return -std::sqrt(sum_sq);
 }
 
-// --- Meta-Path Guided Beam Search ---
-// Change this to return both paths and their timestamps
-std::pair<std::vector<Path>, std::vector<std::vector<int>>> beam_search_for_edge(
-    int u, int ts, int beam_width, const MetaPathPattern &pattern,
+// --- Tree-like Negative Sampling ---
+// Generate negative samples that share prefixes with positive path but differ at last node
+std::map<int, std::vector<std::pair<int, int>>> generate_tree_negatives(
+    int u, int ts, int beam_width, const ShortestPathInfo &positive_path,
     const AdjacencyList &adj, const std::unordered_map<int, int> &node_to_type,
-    const std::set<int> &direct_neighbors,
+    const std::set<int> &global_neighbors_of_u,
     const EmbeddingMap &node_embeddings, const EmbeddingMap &relation_embeddings,
     const std::function<float(const std::vector<float> &, const std::vector<float> &, const std::vector<float> &)> &score_func,
-    const std::set<int> &true_path_nodes)
+    const std::string &criteria)
 {
-    std::vector<Path> current_beam;
-    std::vector<std::vector<int>> current_timestamps; // Track timestamps for each path
+    std::map<int, std::vector<std::pair<int, int>>> results; // prefix_length -> [(v', ts)]
     
-    current_beam.push_back({u});
-    current_timestamps.push_back({}); // Empty timestamp vector to start
-
-    int max_depth = static_cast<int>(pattern.steps.size());
-    
-    bool exclude_direct_neighbors = (max_depth >= 2);
-    bool search_completed_successfully = true;
-
-    for (int depth = 0; depth < max_depth; ++depth)
-    {
-        std::vector<std::tuple<float, Path, std::vector<int>>> scored_candidates; // Score, path, timestamps
-
-        int expected_edge_type = std::get<0>(pattern.steps[depth]);
-        int expected_node_type = std::get<1>(pattern.steps[depth]);
-
-        for (size_t path_idx = 0; path_idx < current_beam.size(); ++path_idx)
-        {
-            const auto &path = current_beam[path_idx];
-            const auto &path_timestamps = current_timestamps[path_idx];
+    // For each prefix of the positive path
+    for (int prefix_len = 1; prefix_len <= positive_path.hops; ++prefix_len) {
+        // Get the current node at the end of this prefix
+        int current_node = positive_path.nodes[prefix_len - 1];
+        
+        // Get the next edge type in the positive path
+        if (prefix_len > positive_path.hops) break;
+        int next_edge_type = positive_path.edge_types[prefix_len - 1];
+        
+        // Get the expected node type for the target
+        int expected_node_type = positive_path.node_types[prefix_len];
+        
+        // Find all temporal neighbors of current_node via next_edge_type
+        std::vector<std::tuple<float, int, int>> scored_candidates; // (score, node, timestamp)
+        
+        if (adj.count(current_node) && 
+            adj.at(current_node).count(next_edge_type) &&
+            adj.at(current_node).at(next_edge_type).count(expected_node_type)) {
             
-            int last_node = path.back();
-
-            // Check if node exists in adjacency list
-            if (adj.count(last_node) == 0)
-                continue;
-
-            // Check if expected edge type exists for this node
-            if (adj.at(last_node).count(expected_edge_type) == 0)
-                continue;
-
-            // Check if expected neighbor type exists for this edge type
-            if (adj.at(last_node).at(expected_edge_type).count(expected_node_type) == 0)
-                continue;
-
-            const auto &ts_to_neighbors = adj.at(last_node).at(expected_edge_type).at(expected_node_type);
-
-            // Binary search for the latest valid timestamp
+            const auto &ts_to_neighbors = adj.at(current_node).at(next_edge_type).at(expected_node_type);
+            
+            // Find all neighbors connected before timestamp ts
             auto upper_it = ts_to_neighbors.lower_bound(ts);
-
-            // Iterate backwards from the latest valid timestamp
-            for (auto rev_it = std::reverse_iterator(upper_it);
-                 rev_it != ts_to_neighbors.rend(); ++rev_it)
-            {
-                int timestamp = rev_it->first;
-                int neighbor_node = rev_it->second;
-
-                // Skip if this node is in the true shortest path
-                if (true_path_nodes.count(neighbor_node) > 0)
-                    continue;
-
-                // Only exclude direct neighbors at the final step (depth == max_depth-1) 
-                // and only if the path has >= 2 hops
-                if (exclude_direct_neighbors && depth > 0 && direct_neighbors.count(neighbor_node))
-                    continue;
-    
-                // Verify neighbor node type matches expected
-                if (node_to_type.count(neighbor_node) == 0 ||
-                    node_to_type.at(neighbor_node) != expected_node_type)
-                    continue;
-
-                // Create new path and timestamps
-                Path new_path = path;
-                std::vector<int> new_timestamps = path_timestamps;
+            for (auto it = ts_to_neighbors.begin(); it != upper_it; ++it) {
+                int candidate_node = it->second;
+                int edge_timestamp = it->first;
                 
-                new_path.push_back(expected_edge_type);
-                new_path.push_back(neighbor_node);
-                new_timestamps.push_back(timestamp); // Add the timestamp of this edge
-
-                // Score the path using KGE model
-                try
-                {
-                    const auto &h_emb = node_embeddings.at(u);
-                    const auto &r_emb = relation_embeddings.at(expected_edge_type);
-                    const auto &t_emb = node_embeddings.at(neighbor_node);
-                    float score = score_func(h_emb, r_emb, t_emb);
-                    scored_candidates.emplace_back(score, new_path, new_timestamps);
-                }
-                catch (const std::out_of_range &oor)
-                {
-                    // Skip path if embeddings are missing
-                    continue;
+                // Skip if this is the positive path node
+                if (candidate_node == positive_path.nodes[prefix_len]) continue;
+                
+                // Skip if this node is ever connected to u (global neighbor check)
+                if (global_neighbors_of_u.count(candidate_node)) continue;
+                
+                if (criteria == "score") {
+                    // Score the triple (current_node, next_edge_type, candidate_node)
+                    try {
+                        const auto &h_emb = node_embeddings.at(current_node);
+                        const auto &r_emb = relation_embeddings.at(next_edge_type);
+                        const auto &t_emb = node_embeddings.at(candidate_node);
+                        float score = score_func(h_emb, r_emb, t_emb);
+                        scored_candidates.emplace_back(score, candidate_node, edge_timestamp);
+                    } catch (const std::out_of_range &) {
+                        // Skip if embeddings are missing
+                        continue;
+                    }
+                } else { // criteria == "time"
+                    // Use timestamp as score (higher timestamp = better score)
+                    float timestamp_score = static_cast<float>(edge_timestamp);
+                    scored_candidates.emplace_back(timestamp_score, candidate_node, edge_timestamp);
                 }
             }
         }
-
-        if (scored_candidates.empty())
-        {
-            search_completed_successfully = false;
-            break;
-        }
-
-        // Sort by score (descending) and keep top beam_width candidates
+        
+        // Sort by score (descending) and keep top beam_width
         std::sort(scored_candidates.begin(), scored_candidates.end(),
-                  [](const auto &a, const auto &b)
-                  { return std::get<0>(a) > std::get<0>(b); });
-
-        if (scored_candidates.size() > beam_width)
-        {
+                  [](const auto &a, const auto &b) { return std::get<0>(a) > std::get<0>(b); });
+        
+        if (scored_candidates.size() > static_cast<size_t>(beam_width)) {
             scored_candidates.resize(beam_width);
         }
-
-        // Update current beam and timestamps
-        current_beam.clear();
-        current_timestamps.clear();
         
-        for (const auto &scored_info : scored_candidates)
-        {
-            current_beam.push_back(std::get<1>(scored_info));
-            current_timestamps.push_back(std::get<2>(scored_info));
+        // Store results for this prefix length
+        std::vector<std::pair<int, int>> prefix_results;
+        for (const auto &candidate : scored_candidates) {
+            prefix_results.emplace_back(std::get<1>(candidate), std::get<2>(candidate));
+        }
+        
+        if (!prefix_results.empty()) {
+            results[prefix_len] = prefix_results;
         }
     }
-
-    // If the search was disrupted and did not complete, return empty vectors
-    if (!search_completed_successfully)
-    {
-        current_beam.clear();
-        current_timestamps.clear();
-    }
-
-    return {current_beam, current_timestamps};
+    
+    return results;
 }
 
 // --- Main Execution ---
 int main(int argc, char *argv[])
 {
-    if (argc != 8) 
+    if (argc != 9) 
     {
         // Initial error to std::cerr as log_stream is not yet set up.
-        std::cerr << "[Error] " << getCurrentTimestamp() << " Usage: " << argv[0] << " <dataset_name> <partition> <model_name> <beam_width> <storage_dir> <num_threads> <thread_id>" << std::endl;
+        std::cerr << "[Error] " << getCurrentTimestamp() << " Usage: " << argv[0] << " <dataset_name> <partition> <model_name> <beam_width> <storage_dir> <num_threads> <thread_id> <criteria>" << std::endl;
         return 1;
     }
 
@@ -417,6 +369,7 @@ int main(int argc, char *argv[])
     std::string storage_dir = argv[5]; 
     int num_threads = std::stoi(argv[6]); 
     int thread_id = std::stoi(argv[7]);   
+    std::string criteria = argv[8];  // New criteria argument   
 
     std::string log_file_name = storage_dir + "/" + dataset + "_preprocess_logs_" + std::to_string(num_threads) + "_" + std::to_string(thread_id) + ".txt";
     std::ofstream log_stream(log_file_name, std::ios_base::app);
@@ -427,26 +380,37 @@ int main(int argc, char *argv[])
     }
 
     log_stream << "[Info] " << getCurrentTimestamp() << " Starting preprocess for dataset: " << dataset << ", partition: " << partition << ", model: " << model_name 
-              << ", beam: " << beam_width << ", storage: " << storage_dir << ", threads: " << num_threads << ", tid: " << thread_id << std::endl;
+              << ", beam: " << beam_width << ", storage: " << storage_dir << ", threads: " << num_threads << ", tid: " << thread_id << ", criteria: " << criteria << std::endl;
 
-    // 1. Load Embeddings
-    EmbeddingMap node_embeddings, relation_embeddings;
-    std::string embed_prefix = storage_dir + "/" + model_name + "_" + dataset + "_" + partition;
-
-    try
-    {
-        load_embeddings_from_file(embed_prefix + "_nodes.txt", node_embeddings, log_stream);
-        load_embeddings_from_file(embed_prefix + "_relations.txt", relation_embeddings, log_stream);
-    }
-    catch (const std::exception &e)
-    {
-        log_stream << "[Error] " << getCurrentTimestamp() << " Error loading embeddings: " << e.what() << std::endl;
+    // Validate criteria
+    if (criteria != "score" && criteria != "time") {
+        log_stream << "[Error] " << getCurrentTimestamp() << " Invalid criteria: " << criteria << ". Must be 'score' or 'time'." << std::endl;
         return 1;
     }
 
-    // 2. Load Graph Data
+    // 1. Load Embeddings (only if criteria is "score")
+    EmbeddingMap node_embeddings, relation_embeddings;
+    if (criteria == "score") {
+        std::string embed_prefix = storage_dir + "/" + model_name + "_" + dataset + "_" + partition;
+
+        try
+        {
+            load_embeddings_from_file(embed_prefix + "_nodes.txt", node_embeddings, log_stream);
+            load_embeddings_from_file(embed_prefix + "_relations.txt", relation_embeddings, log_stream);
+        }
+        catch (const std::exception &e)
+        {
+            log_stream << "[Error] " << getCurrentTimestamp() << " Error loading embeddings: " << e.what() << std::endl;
+            return 1;
+        }
+    } else {
+        log_stream << "[Info] " << getCurrentTimestamp() << " Skipping embedding loading for time-based criteria." << std::endl;
+    }
+
+    // 2. Load Graph Data and build global neighbors
     AdjacencyList adj;
     std::unordered_map<int, int> node_to_type; 
+    std::unordered_map<int, std::set<int>> global_neighbors; // u -> all neighbors across all time
     std::vector<std::tuple<int, int, int, int>> queries; 
     std::string csv_path = storage_dir + "/" + dataset + "_edges.csv";
     std::ifstream csv_file(csv_path);
@@ -466,7 +430,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    log_stream << "[Info] " << getCurrentTimestamp() << " Building enhanced adjacency list with node types from " << csv_path << "..." << std::endl;
+    log_stream << "[Info] " << getCurrentTimestamp() << " Building enhanced adjacency list with node types and global neighbors from " << csv_path << "..." << std::endl;
     int line_number = 1; 
     while (std::getline(csv_file, line)) 
     {
@@ -495,6 +459,10 @@ int main(int argc, char *argv[])
                 node_to_type[u] = u_type;
                 node_to_type[v] = v_type;
                 adj[u][edge_type][v_type].emplace(ts_val, v);
+                
+                // Build global neighbors (bidirectional)
+                global_neighbors[u].insert(v);
+                global_neighbors[v].insert(u);
             }
 
             if (row_map_data.count("split") && row_map_data.at("split") == partition)
@@ -518,30 +486,33 @@ int main(int argc, char *argv[])
     log_stream << "[Info] " << getCurrentTimestamp() << " Loaded enhanced graph with " << adj.size() << " source nodes and "
               << queries.size() << " queries for partition " << partition << "." << std::endl;
     log_stream << "[Info] " << getCurrentTimestamp() << " Populated " << node_to_type.size() << " node to type mappings." << std::endl;
+    log_stream << "[Info] " << getCurrentTimestamp() << " Built global neighbors for " << global_neighbors.size() << " nodes." << std::endl;
 
     // 3. Load Shortest Paths
     std::string paths_file_txt = storage_dir + "/" + dataset + "_paths.txt"; 
     auto shortest_paths = load_shortest_paths(paths_file_txt, node_to_type, log_stream); 
 
-    // 4. Select scoring function
+    // 4. Select scoring function (only if criteria is "score")
     std::function<float(const std::vector<float> &, const std::vector<float> &, const std::vector<float> &)> score_func;
-    if (model_name == "transe")
-        score_func = score_transe;
-    else if (model_name == "distmult")
-        score_func = score_distmult;
-    else if (model_name == "complex")
-        score_func = score_complex;
-    else if (model_name == "rotate")
-        score_func = score_rotate;
-    else
-    {
-        log_stream << "[Error] " << getCurrentTimestamp() << " Unsupported model: " << model_name << std::endl;
-        return 1;
+    if (criteria == "score") {
+        if (model_name == "transe")
+            score_func = score_transe;
+        else if (model_name == "distmult")
+            score_func = score_distmult;
+        else if (model_name == "complex")
+            score_func = score_complex;
+        else if (model_name == "rotate")
+            score_func = score_rotate;
+        else
+        {
+            log_stream << "[Error] " << getCurrentTimestamp() << " Unsupported model: " << model_name << std::endl;
+            return 1;
+        }
     }
 
-    // 5. Run Meta-Path Guided Beam Search
-    log_stream << "[Info] " << getCurrentTimestamp() << " Starting meta-path guided beam search..." << std::endl;
-    std::map<int, std::pair<std::vector<Path>, std::vector<std::vector<int>>>> final_results;
+    // 5. Run Tree-like Negative Sampling
+    log_stream << "[Info] " << getCurrentTimestamp() << " Starting tree-like negative sampling with criteria: " << criteria << "..." << std::endl;
+    std::map<int, std::map<int, std::vector<std::pair<int, int>>>> final_results; // eid -> {prefix_len -> [(v', ts)]}
 
     for (const auto &q : queries)
     {
@@ -555,47 +526,28 @@ int main(int argc, char *argv[])
             continue; 
         }
 
-        MetaPathPattern pattern = extract_meta_path_pattern(shortest_paths.at(eid), log_stream);
-        if (pattern.steps.empty())
-        {
-            if (shortest_paths.at(eid).hops > 0) { 
-                 log_stream << "[Warning] " << getCurrentTimestamp() << " Empty meta-path pattern for EID " << eid << " with " << shortest_paths.at(eid).hops << " hops. Skipping." << std::endl;
-            }
-            continue; 
+        const ShortestPathInfo& positive_path = shortest_paths.at(eid);
+        if (positive_path.hops == 0) {
+            continue; // Skip direct edges
         }
 
-        std::set<int> direct_neighbors;
-        if (adj.count(u_node))
-        {
-            for (const auto &edge_type_pair : adj.at(u_node))
-            {
-                for (const auto &neighbor_type_pair : edge_type_pair.second)
-                {
-                    for (const auto &ts_neighbor_pair : neighbor_type_pair.second)
-                    {
-                        if (ts_neighbor_pair.first < ts_val)
-                        { 
-                            direct_neighbors.insert(ts_neighbor_pair.second);
-                        }
-                    }
-                }
-            }
+        // Get global neighbors of u_node
+        std::set<int> global_neighbors_of_u;
+        if (global_neighbors.count(u_node)) {
+            global_neighbors_of_u = global_neighbors.at(u_node);
         }
 
-        const ShortestPathInfo& true_path_info = shortest_paths.at(eid);
-        std::set<int> true_path_nodes(true_path_info.nodes.begin(), true_path_info.nodes.end());
-
-        auto [found_paths, path_timestamps] = beam_search_for_edge(u_node, ts_val, beam_width, pattern, adj,
-                                                        node_to_type, direct_neighbors,
-                                                        node_embeddings, relation_embeddings, score_func,
-                                                        true_path_nodes);
-        if (!found_paths.empty())
+        auto tree_negatives = generate_tree_negatives(u_node, ts_val, beam_width, positive_path, adj,
+                                                     node_to_type, global_neighbors_of_u,
+                                                     node_embeddings, relation_embeddings, score_func, criteria);
+        
+        if (!tree_negatives.empty())
         {
-            final_results[eid] = {found_paths, path_timestamps};
+            final_results[eid] = tree_negatives;
         }
     }
 
-    // 6. Save results to JSON with timestamps
+    // 6. Save results to JSON with new tree-like structure
     std::cout << "{\n"; // Output to stdout
     bool first_entry = true;
     for (const auto &pair : final_results)
@@ -604,45 +556,38 @@ int main(int argc, char *argv[])
             std::cout << ",\n"; // Output to stdout
         
         int eid = pair.first;
-        const auto &paths = pair.second.first;
-        const auto &timestamps = pair.second.second;
+        const auto &prefix_results = pair.second;
         
         std::cout << "  \"" << eid << "\": {\n"; // Output to stdout
         
-        // Output paths
-        std::cout << "    \"paths\": [\n"; // Output to stdout
-        for (size_t i = 0; i < paths.size(); ++i)
-        {
-            std::cout << "      ["; // Output to stdout
-            for (size_t j = 0; j < paths[i].size(); ++j)
-            {
-                std::cout << paths[i][j] << (j == paths[i].size() - 1 ? "" : ", "); // Output to stdout
+        bool first_prefix = true;
+        for (const auto &prefix_pair : prefix_results) {
+            if (!first_prefix)
+                std::cout << ",\n"; // Output to stdout
+            
+            int prefix_len = prefix_pair.first;
+            const auto &candidates = prefix_pair.second;
+            
+            std::cout << "    \"" << prefix_len << "\": [\n"; // Output to stdout
+            
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                int node_id = candidates[i].first;
+                int timestamp = candidates[i].second;
+                
+                std::cout << "      [" << node_id << ", " << timestamp << "]";
+                if (i < candidates.size() - 1) std::cout << ",";
+                std::cout << "\n"; // Output to stdout
             }
-            std::cout << "]" << (i == paths.size() - 1 ? "" : ","); // Output to stdout
-            std::cout << "\n"; // Output to stdout
+            
+            std::cout << "    ]"; // Output to stdout
+            first_prefix = false;
         }
-        std::cout << "    ],\n"; // Output to stdout
-        
-        // Output timestamps
-        std::cout << "    \"timestamps\": [\n"; // Output to stdout
-        for (size_t i = 0; i < timestamps.size(); ++i)
-        {
-            std::cout << "      ["; // Output to stdout
-            for (size_t j = 0; j < timestamps[i].size(); ++j)
-            {
-                std::cout << timestamps[i][j] << (j == timestamps[i].size() - 1 ? "" : ", "); // Output to stdout
-            }
-            std::cout << "]" << (i == timestamps.size() - 1 ? "" : ","); // Output to stdout
-            std::cout << "\n"; // Output to stdout
-        }
-        std::cout << "    ]\n"; // Output to stdout
-        
-        std::cout << "  }"; // Output to stdout
+        std::cout << "\n  }"; // Output to stdout
         first_entry = false;
     }
     std::cout << "\n}\n"; // Output to stdout
 
-    log_stream << "[Info] " << getCurrentTimestamp() << " Finished processing. Results with timestamps output to stdout." << std::endl;
+    log_stream << "[Info] " << getCurrentTimestamp() << " Finished processing. Tree-like negative sampling results (" << criteria << "-based) output to stdout." << std::endl;
     log_stream.close();
 
     return 0;
