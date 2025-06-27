@@ -79,6 +79,7 @@ class PathPredictor(LightningModule):
         scale_loss=False,
         chi2=False,
         positive_deviation=False,
+        loss_decay: float = 0.5,
         **kwargs  # Additional hyperparameters
     ):
         super().__init__()
@@ -151,7 +152,6 @@ class PathPredictor(LightningModule):
         """
         # Collection for tracking unique samples and their scores
         all_samples = []  # List of unique samples identified by (u, v, ts)
-        sample_to_prefix_scores = {}  # sample_idx -> {prefix_len -> scores}
         
         # Sort prefix lengths to process from shorter to longer
         sorted_prefix_lengths = sorted(batch.keys())
@@ -167,7 +167,7 @@ class PathPredictor(LightningModule):
             
             # Process each sample's metadata
             for sample_meta in meta_data:
-                # Create a unique key for this sample
+                # Create a unique key for this sample using .item() only for metadata
                 u = sample_meta.get('u', -1).item() if hasattr(sample_meta.get('u', -1), 'item') else sample_meta.get('u', -1)
                 v = sample_meta.get('v', -1).item() if hasattr(sample_meta.get('v', -1), 'item') else sample_meta.get('v', -1)
                 ts = sample_meta.get('ts', -1).item() if hasattr(sample_meta.get('ts', -1), 'item') else sample_meta.get('ts', -1)
@@ -176,7 +176,7 @@ class PathPredictor(LightningModule):
                 if sample_key not in seen_samples:
                     seen_samples.add(sample_key)
                     all_samples.append(sample_meta)  # Store the full metadata for this sample
-        
+    
         outputs = {}
         
         # Process each prefix length
@@ -205,15 +205,16 @@ class PathPredictor(LightningModule):
                 # No type embeddings available, skip this prefix length
                 continue
             
-            type_embeddings = torch.stack(type_embeddings, dim=0)
+            # Use tensor operations for embeddings
+            type_embeddings = torch.stack([torch.stack(embs) for embs in type_embeddings])
             edge_embeddings = torch.cat([type_embeddings, edge_embeddings], dim=1)
             
             # Create interleaved edge-node embeddings
             batch_size, length, emb_dim = node_embeddings.size()
-            embeddings = torch.empty(batch_size, length, emb_dim, dtype=node_embeddings.dtype,
-                                        device=node_embeddings.device)
+            embeddings = torch.zeros(batch_size, length, emb_dim, dtype=node_embeddings.dtype,
+                                    device=node_embeddings.device)
             
-            # Edge embeddings start first
+            # Edge embeddings start first - use tensor operations
             embeddings[:, 0::2, :] = edge_embeddings
             embeddings[:, 1::2, :] = node_embeddings
             
@@ -221,131 +222,251 @@ class PathPredictor(LightningModule):
             pred_emb = self.forward(embeddings, use_causal_mask=False)
             pred_scores = self.score_proj(pred_emb[:, 0, :])
             
+            # Compute z-scores while preserving gradients
             cur_idx = 0
-            z_scores = []
+            z_scores_list = []
+            
             for num_path in num_paths:
                 # Get the current sample's prefix scores
                 scores = pred_scores[cur_idx:cur_idx + num_path]
                 cur_idx += num_path
                 
-                mean, std = scores.mean(0), scores.std(0, correction=0)
-                z = (scores[0] - mean)/(std+1e-8)
-                z_scores.append(z)
+                # Calculate mean and std while preserving gradients
+                mean = scores.mean(0)
+                # Use unbiased=False to match previous behavior
+                std = scores.std(0, unbiased=False)
                 
-            # Stack z_scores into single torch tensor
-            z_scores = torch.stack(z_scores)
+                # Calculate z-score for first score (positive sample)
+                z = (scores[0] - mean)/(std + 1e-8)
+                z_scores_list.append(z)
+            
+            # Stack z_scores into single torch tensor - maintains gradients
+            z_scores = torch.stack(z_scores_list)
             
             # Create unified outputs from z_scores and meta
             outputs[prefix_len] = {
-                'z_scores': z_scores,
-                'meta': meta_data
+                'z_scores': z_scores,  # This now preserves gradients
+                'meta': meta_data,
+                'raw_scores': pred_scores  # Include raw scores for debugging
             }
         
         return outputs
     
     def training_step(self, batch, batch_idx):
-        diff, meta = self._predict(batch)
-        
-        losses, ptr = [], 0
-        for info in meta:
-            if len(info) == 1:
-                # This sample has no paths, skip loss calculation
-                continue
-            
-            num_paths, length, label = info
-            # This part of the loop is only reachable if diff is not None
-            slice_diff = diff[ptr:ptr + num_paths, :length]
-            pos, neg = slice_diff[0], slice_diff[1:]
-            if neg.numel():
-                refs = slice_diff if self.hparams.positive_deviation else neg
-                
-                mean, std = refs.mean(0), refs.std(0, correction=0)
-                z = (pos - mean)/(std+1e-8)
-                mean_z = z.mean() if label else -z.mean()
+        outputs = self._predict(batch)
 
-                # Apply arcsinh scaling if specified
-                loss = torch.asinh(mean_z) if self.scale_loss else mean_z
-                losses.append(loss)
-            
-            ptr += num_paths
-        
-        if not losses:
-            # No loss was computed for this batch (e.g., no paths or no negative samples)
+        if not outputs:  # Check if outputs is empty
             return None
+            
+        # Get all prefix lengths from the outputs
+        prefix_lengths = sorted([int(k) for k in outputs.keys() if k.isdigit()])
+        if not prefix_lengths:
+            return None  # No valid prefix lengths
+        
+        # First, collect all unique samples across all prefix lengths
+        all_samples = []  # List of unique samples identified by (u, v, ts)
+        sample_to_idx = {}  # Maps sample key to index in all_samples
+        
+        # First pass: collect all unique samples and map to indices
+        for prefix_len in prefix_lengths:
+            if prefix_len not in outputs or 'meta' not in outputs[prefix_len]:
+                continue
+                
+            meta_data = outputs[prefix_len]['meta']
+            
+            for meta in meta_data:
+                # Create a unique key for this sample
+                u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
+                v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
+                ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
+                sample_key = (u, v, ts)
+                
+                if sample_key not in sample_to_idx:
+                    sample_to_idx[sample_key] = len(all_samples)
+                    all_samples.append(meta)  # Store the full metadata for future reference
+    
+        if not all_samples:
+            return None  # No samples found
+        
+        # Create tensors for z-scores, mask, weights, and labels
+        num_samples = len(all_samples)
+        num_prefix_lengths = len(prefix_lengths)
+        
+        z_scores = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
+        mask = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
+        weights = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
+        
+        # Extract labels from all unique samples
+        labels = []
+        for meta in all_samples:
+            label = meta.get('label', 0)
+            if isinstance(label, torch.Tensor):
+                labels.append(label)
+            else:
+                labels.append(torch.tensor(label, device=self.device))
+        labels = torch.stack(labels)
+        
+        # Second pass: fill z-scores and mask tensors
+        for i, prefix_len in enumerate(prefix_lengths):
+            if prefix_len not in outputs or 'z_scores' not in outputs[prefix_len] or 'meta' not in outputs[prefix_len]:
+                continue
+                
+            prefix_scores = outputs[prefix_len]['z_scores']  # These now have gradients preserved
+            meta_data = outputs[prefix_len]['meta']
+            
+            # Fill z-scores tensor for this prefix length
+            for j, (score, meta) in enumerate(zip(prefix_scores, meta_data)):
+                # It's okay to use .item() for metadata since they're just for lookup
+                u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
+                v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
+                ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
+                sample_key = (u, v, ts)
+                
+                sample_idx = sample_to_idx.get(sample_key, -1)
+                if sample_idx >= 0:
+                    # Directly assign the score tensor to preserve gradients
+                    z_scores[sample_idx, i] = score
+                    mask[sample_idx, i] = 1.0
 
-        loss = torch.stack(losses).mean()
+        # Calculate weights with exponential decay
+        decay_rate = self.hparams.loss_decay
+        for i, prefix_len in enumerate(prefix_lengths):
+            # Higher weights for longer prefixes
+            weights[:, i] = torch.exp(-decay_rate * (prefix_lengths[-1] - prefix_len))
+        
+        # Apply scaling if configured (MOVED HERE - before label adjustment)
+        if self.scale_loss:
+            z_scores = torch.asinh(z_scores)
+        
+        # Adjust z-scores based on labels (we want to maximize for positive, minimize for negative)
+        adjusted_z_scores = z_scores * (2 * labels.unsqueeze(1) - 1)  # Maps 0->-1, 1->1
+        
+        # Calculate weighted sum
+        weighted_sum = (weights * mask * adjusted_z_scores).sum(dim=1)
+        weight_sum = (weights * mask).sum(dim=1) + 1e-8  # Avoid division by zero
+        
+        # Get average score per sample
+        weighted_avg = weighted_sum / weight_sum
+        
+        # Overall loss is negative mean of weighted averages (we want to maximize scores)
+        loss = -weighted_avg.mean()
+        
+        # Remove scaling from here since it's now applied to z-scores directly
+        # if self.scale_loss:
+        #     loss = torch.asinh(loss)
         
         self.log('train_loss', loss, on_step=True, prog_bar=True)
-        
         return loss
 
     def _evaluation_step(self, batch, batch_idx):
-        diff, meta = self._predict(batch)
-        
-        batch_items = []  # Store structured items for each sample
-        losses = []
-                
-        ptr = 0
-        for meta_info in meta:
-            if len(meta_info) == 1:
-                item = {
-                    "score": 0.0,
-                    "length": None,
-                    "label": meta_info[0],  # Single label for this sample
-                }
-                batch_items.append(item)
-                continue
-            
-            num_paths, length, label = meta_info
-            
-            slice_diff = diff[ptr:ptr + num_paths, :length]
-            pos, neg = slice_diff[0], slice_diff[1:]
-            loss, mean_z_pos = None, None
-            
-            if neg.numel() > 0:
-                refs = slice_diff if self.hparams.positive_deviation else neg
-                
-                mean, std = refs.mean(0), refs.std(0, correction=0)
-                z_pos = (pos - mean)/(std+1e-8)
-                mean_z_pos = z_pos.mean()
-                
-                if self.hparams.chi2:
-                    # Chi statistic from z-scores (L2 norm of z-score vector)
-                    chi_stat = torch.norm(z_pos)
-                    
-                    # Degrees of freedom = path length
-                    df = torch.tensor(length, device=self.device, dtype=torch.float)
-                    
-                    # CDF of chi distribution
-                    chi_dist = torch.distributions.chi.Chi(df)
-                    cdf_val = chi_dist.cdf(chi_stat)
-                    percentile_pos = 1.0 - cdf_val.item()
-                else:
-                    # Convert mean z-score to percentile for positive sample using normal CDF
-                    percentile_pos = 1.0 - torch.special.ndtr(mean_z_pos).item()
-                
-                # Calculate mean z-score for loss
-                loss = torch.asinh(mean_z_pos) if self.scale_loss else mean_z_pos
-                losses.append(loss if label else -loss)
-            else:
-                percentile_pos = 1.0
+        outputs = self._predict(batch)
 
-            # Create item with organized structure
+        if not outputs:
+            return torch.tensor(0.0, device=self.device), []
+
+        # --- Loss calculation similar to training_step ---
+        prefix_lengths = sorted([int(k) for k in outputs.keys() if k.isdigit()])
+        if not prefix_lengths:
+            return torch.tensor(0.0, device=self.device), []
+
+        all_samples = []
+        sample_to_idx = {}
+        
+        for prefix_len in prefix_lengths:
+            if prefix_len not in outputs or 'meta' not in outputs[prefix_len]:
+                continue
+            meta_data = outputs[prefix_len]['meta']
+            for meta in meta_data:
+                u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
+                v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
+                ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
+                sample_key = (u, v, ts)
+                if sample_key not in sample_to_idx:
+                    sample_to_idx[sample_key] = len(all_samples)
+                    all_samples.append(meta)
+
+        if not all_samples:
+            return torch.tensor(0.0, device=self.device), []
+
+        num_samples = len(all_samples)
+        num_prefix_lengths = len(prefix_lengths)
+        
+        z_scores = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
+        mask = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
+        weights = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
+        
+        labels = []
+        for meta in all_samples:
+            label = meta.get('label', 0)
+            if isinstance(label, torch.Tensor):
+                labels.append(label)
+            else:
+                labels.append(torch.tensor(label, device=self.device))
+        labels = torch.stack(labels)
+        
+        for i, prefix_len in enumerate(prefix_lengths):
+            if prefix_len not in outputs or 'z_scores' not in outputs[prefix_len] or 'meta' not in outputs[prefix_len]:
+                continue
+            prefix_scores = outputs[prefix_len]['z_scores']
+            meta_data = outputs[prefix_len]['meta']
+            for j, (score, meta) in enumerate(zip(prefix_scores, meta_data)):
+                u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
+                v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
+                ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
+                sample_key = (u, v, ts)
+                sample_idx = sample_to_idx.get(sample_key, -1)
+                if sample_idx >= 0:
+                    z_scores[sample_idx, i] = score
+                    mask[sample_idx, i] = 1.0
+
+        decay_rate = self.hparams.loss_decay
+        for i, prefix_len in enumerate(prefix_lengths):
+            weights[:, i] = torch.exp(-decay_rate * (prefix_lengths[-1] - prefix_len))
+        
+        scaled_z_scores = torch.asinh(z_scores) if self.scale_loss else z_scores
+        
+        adjusted_z_scores = scaled_z_scores * (2 * labels.unsqueeze(1) - 1)
+        
+        weighted_sum = (weights * mask * adjusted_z_scores).sum(dim=1)
+        weight_sum = (weights * mask).sum(dim=1) + 1e-8
+        
+        weighted_avg = weighted_sum / weight_sum
+        
+        loss = -weighted_avg.mean()
+
+        # --- Create batch_items for evaluation ---
+        batch_items = []
+        for i, meta in enumerate(all_samples):
+            u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
+            v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
+            ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
+            edge_type = meta.get('edge_type')
+            if hasattr(edge_type, 'item'):
+                edge_type = edge_type.item()
+            
+            # Find the score and length for the longest prefix
+            sample_mask = mask[i]
+            present_indices = sample_mask.nonzero(as_tuple=True)[0]
+            
+            score_for_longest_prefix = 0.0
+            length_for_longest_prefix = 0
+            if len(present_indices) > 0:
+                max_len_idx = present_indices.max()
+                # Use scaled_z_scores as this is the basis for evaluation scores
+                score_for_longest_prefix = scaled_z_scores[i, max_len_idx].item()
+                length_for_longest_prefix = prefix_lengths[max_len_idx]
+
             item = {
-                'score': percentile_pos,  # Single percentile from mean z-score
-                'pos_dist': pos.detach().cpu().numpy(),  # Distance for positive sample
-                'neg_dist': neg.detach().cpu().numpy() if neg.numel() > 0 else None,  # Distances for negative samples
-                'length': length,  # Path length for this sample
-                'label': label,  # Label for this sample
-                'has_neg': neg.numel() > 0,
-                'loss': loss,  # Loss for this sample'
-                'mean_z_pos': mean_z_pos
+                'u': u,
+                'v': v,
+                'ts': ts,
+                'edge_type': edge_type,
+                'label': labels[i].item(),
+                'loss': -weighted_avg[i],  # Keep as tensor for epoch-end aggregation
+                'score': score_for_longest_prefix,
+                'length': length_for_longest_prefix,
             }
             batch_items.append(item)
-            ptr += num_paths
-        
-        # Use negated z-scores for loss, similar to training_step
-        loss = torch.stack(losses).mean() if losses else torch.tensor(0.0, device=self.device)
         
         return loss, batch_items
 
@@ -366,98 +487,70 @@ class PathPredictor(LightningModule):
             print(f"Warning: No outputs found in {stage} step. Skipping {stage} epoch end.")
             return
 
-        # Calculate epoch-level loss
+        from collections import defaultdict
+
+        # --- Aggregate all items and losses from outputs ---
+        all_items = []
         pos_losses = []
         neg_losses = []
-        for output in tqdm(outputs, desc=f"Processing {stage} losses"):
-            if output and 'loss' in output and output['loss'] is not None and 'items' in output:
-                for item in output['items']:
-                    if 'loss' in item and item['loss'] is not None:
-                        if item['label'] == 1:
-                            pos_losses.append(item['loss'])
-                        elif item['label'] == 0:
-                            neg_losses.append(item['loss'])
-        
-        if pos_losses:
-            pos_epoch_loss = torch.stack(pos_losses).mean()
-            self.log(f'{stage}_pos_loss', pos_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
-            print(f"{stage.capitalize()} positive loss: {pos_epoch_loss.item()}")
-        else:
-            pos_epoch_loss = torch.tensor(0.0, device=self.device)
-            self.log(f'{stage}_pos_loss', pos_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
-            print(f"Warning: No positive losses found in {stage} step. Skipping {stage} positive loss logging.")
-        
-        if neg_losses:
-            neg_epoch_loss = -torch.stack(neg_losses).mean()
-            self.log(f'{stage}_neg_loss', neg_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
-            print(f"{stage.capitalize()} negative loss: {neg_epoch_loss.item()}")
-        else:
-            neg_epoch_loss = torch.tensor(0.0, device=self.device)
-            self.log(f'{stage}_neg_loss', neg_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
-            print(f"Warning: No negative losses found in {stage} step. Skipping {stage} negative loss logging.")
-            
-        if pos_losses or neg_losses:
-            mean_epoch_loss = pos_epoch_loss + neg_epoch_loss
-            self.log(f'{stage}_loss', mean_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
-            print(f"{stage.capitalize()} loss: {mean_epoch_loss.item()}")
-        else:
-            print(f"Warning: No valid losses found in {stage} step. Skipping {stage} loss logging.")
-        
-        # Extract and organize values for evaluation
-        scores, lengths, labels, has_neg = [], [], [], []
-        pos_dist, neg_dists, mean_z, losses = [], [], [], []
-        
-        # New lists for edge information
-        source_nodes, target_nodes, timestamps = [], [], []
-        
-        max_hops = self.hparams.max_hops
-        max_adjust = self.hparams.get('max_adjust', 1.0)
-        
         for output in tqdm(outputs, desc=f"Processing {stage} outputs"):
             if output and 'items' in output:
                 for item in output['items']:
-                    # Collect standard evaluation data
-                    scores.append(item['score'])
-                    lengths.append(item['length'] if item['length'] is not None else max_hops + 2)
-                    labels.append(item['label'])
-                    has_neg.append(item.get('has_neg', False))
-                    pos_dist.append(item.get('pos_dist', None))
-                    neg_dists.append(item.get('neg_dist', None))
-                    mean_z.append(item.get('mean_z_pos', None))
-                    losses.append(item.get('loss', None))
-                    
-                    # Collect edge information if available
-                    source_nodes.append(item.get('u', None))
-                    target_nodes.append(item.get('v', None))
-                    timestamps.append(item.get('ts', None))
+                    all_items.append(item)
+                    if 'loss' in item and item['loss'] is not None:
+                        if item['label'] == 1:
+                            pos_losses.append(item['loss'])
+                        else:
+                            neg_losses.append(item['loss'])
         
-        if not scores:
-            print(f"Warning: No items with scores found in {stage} outputs. Skipping evaluation.")
+        if not all_items:
+            print(f"Warning: No items found in {stage} outputs. Skipping evaluation.")
             return
 
-        scores = torch.tensor(scores)
-        lengths = torch.tensor(lengths)
-        labels = torch.tensor(labels)
-        has_neg = torch.tensor(has_neg)
-        
-        min_len = lengths.min() if lengths.numel() > 0 else 0
-        ratios = 1 - ((lengths.float() - min_len) / (max_hops - min_len + 1)) # max_hops = max length - 1
-        
-        if self.hparams.get('adjust_no_neg_paths_samples', True):
-            adjusted_scores = scores + (ratios * max_adjust)
-        else:
-            adjusted_scores = scores.clone()
-            if has_neg.any():
-                adjustment = ratios[has_neg] * max_adjust
-                adjusted_scores[has_neg] = scores[has_neg] + adjustment
-        
-        dataset_name = self.trainer.datamodule.dataset
-        results = evaluate(dataset_name, adjusted_scores[labels == 1], adjusted_scores[labels == 0])
-        
-        for k, v in results.items():
-            self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
+        # --- Log epoch-level losses ---
+        if pos_losses:
+            pos_epoch_loss = torch.stack(pos_losses).mean()
+            self.log(f'{stage}_pos_loss', pos_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
+        if neg_losses:
+            neg_epoch_loss = -torch.stack(neg_losses).mean()
+            self.log(f'{stage}_neg_loss', neg_epoch_loss, prog_bar=True, on_step=False, on_epoch=True)
+        if pos_losses or neg_losses:
+            total_loss = torch.stack(pos_losses + neg_losses).mean()
+            self.log(f'{stage}_loss', total_loss, prog_bar=True, on_step=False, on_epoch=True)
+            print(f"[{stage.upper()}] Loss: {total_loss:.4f}")
 
-        # --- Export as JSON: a list of dicts, one per item ---
+        # --- Group scores by edge for evaluation ---
+        edge_groups = defaultdict(lambda: {'pos_score': None, 'neg_scores': []})
+        for item in all_items:
+            key = (item['u'], item.get('edge_type'), item['v'], item['ts'])
+            score = item['score']
+            if item['label'] == 1:
+                edge_groups[key]['pos_score'] = score
+            else:
+                edge_groups[key]['neg_scores'].append(score)
+
+        pos_scores_list = []
+        neg_scores_list = []
+        for group in edge_groups.values():
+            if group['pos_score'] is not None and group['neg_scores']:
+                pos_scores_list.append(group['pos_score'])
+                neg_scores_list.append(group['neg_scores'])
+
+        if pos_scores_list:
+            max_neg_len = max(len(negs) for negs in neg_scores_list)
+            neg_scores_padded = [negs + [0.0] * (max_neg_len - len(negs)) for negs in neg_scores_list]
+            
+            pos_scores = torch.tensor(pos_scores_list, device=self.device)
+            neg_scores = torch.tensor(neg_scores_padded, device=self.device)
+
+            results = evaluate(pos_scores, neg_scores, verbose=False)
+            for k, v in results.items():
+                self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
+            print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
+        else:
+            print(f"Warning: No positive samples with corresponding negative samples found in {stage}. Skipping metric evaluation.")
+
+        # --- Export raw results to JSON ---
         try:
             epoch = self.trainer.current_epoch
         except Exception:
@@ -468,27 +561,15 @@ class PathPredictor(LightningModule):
         if hasattr(self.trainer.logger, "version"):
             log_dir = os.path.join(log_dir, str(self.trainer.logger.version))
         os.makedirs(log_dir, exist_ok=True)
-        # Determine prefix: "train" if not test_time, "test" if test_time
         test_prefix = "test" if getattr(self.trainer.datamodule, "test_time", False) else "train"
         export_path = os.path.join(log_dir, f"{test_prefix}_{stage}_{epoch}_raw.json")
 
-        # Prepare the list of dicts for export
         export_items = []
-        for i in range(len(scores)):
-            export_items.append({
-                "score": float(scores[i]),
-                "length": int(lengths[i]),
-                "label": int(labels[i]),
-                "has_neg": bool(has_neg[i]),
-                "pos_dist": pos_dist[i].tolist() if pos_dist[i] is not None else None,
-                "neg_dist": neg_dists[i].tolist() if neg_dists[i] is not None else None,
-                "adjusted_score": float(adjusted_scores[i]),
-                "mean_z": float(mean_z[i]) if mean_z[i] is not None else None,
-                "loss": float(losses[i]) if losses[i] is not None else None,
-                "source_node": source_nodes[i],
-                "target_node": target_nodes[i],
-                "timestamp": timestamps[i],
-            })
+        for item in all_items:
+            export_item = item.copy()
+            if isinstance(export_item.get('loss'), torch.Tensor):
+                export_item['loss'] = export_item['loss'].item()
+            export_items.append(export_item)
 
         with open(export_path, "w") as f:
             json.dump(export_items, f, indent=2)
@@ -585,6 +666,7 @@ def main():
         'scale_loss': cfg.get('scale_loss', False),
         'chi2': cfg.get('chi2', False),
         'positive_deviation': cfg.get('positive_deviation', False),
+        'loss_decay': cfg.get('loss_decay', 0.5),
     }
     
     # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
