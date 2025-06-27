@@ -12,7 +12,6 @@
 #include <chrono>   // Added
 #include <iomanip>  // Added
 #include <tuple>
-#include <cmath>
 
 using namespace std;
 
@@ -36,18 +35,16 @@ struct Row
 
 int main(int argc, char **argv)
 {
-    if (argc < 7)
+    if (argc < 5)
     {
         // Initial error to std::cerr as log_stream is not yet set up.
-        std::cerr << "[Error] " << getCurrentTimestamp() << " Usage: " << argv[0] << " <csv_path> <max_hops> <thread_id> <num_threads> <decay_factor> <max_fanout>\n";
+        std::cerr << "[Error] " << getCurrentTimestamp() << " Usage: " << argv[0] << " <csv_path> <max_hops> <thread_id> <num_threads>\n";
         return 1;
     }
     string csv_path = argv[1];
     int max_hops    = stoi(argv[2]);
     int thread_id   = stoi(argv[3]);
     int num_threads = stoi(argv[4]);
-    float decay_factor = stof(argv[5]);
-    int max_fanout     = stoi(argv[6]);
 
     string prefix = csv_path;
     size_t suffix_pos = prefix.rfind("_edges.csv");
@@ -66,8 +63,6 @@ int main(int argc, char **argv)
     log_stream << "[Info] " << getCurrentTimestamp() << " Processing thread " << thread_id << " of " << num_threads << endl;
     log_stream << "[Info] " << getCurrentTimestamp() << " Max hops: " << max_hops << endl;
     log_stream << "[Info] " << getCurrentTimestamp() << " CSV path: " << csv_path << endl;
-    log_stream << "[Info] " << getCurrentTimestamp() << " Decay Factor: " << decay_factor << endl;
-    log_stream << "[Info] " << getCurrentTimestamp() << " Max Fanout: " << max_fanout << endl;
 
     // 1) Load CSV
     vector<string> col_names;
@@ -202,103 +197,54 @@ int main(int argc, char **argv)
             int src_id = r.u; 
             int dst_id = r.v; 
 
-            // Bidirectional BFS setup
-            queue<int> q_fwd, q_bwd;
-            unordered_map<int, int> parent_fwd, parent_bwd;
-            unordered_map<int, int> depth_fwd, depth_bwd;
+            queue<int> q; 
+            unordered_map<int, int> parent_map; 
+            unordered_map<int, int> node_depths;   
             
-            q_fwd.push(src_id);
-            parent_fwd[src_id] = src_id; // Use self as sentinel for visited and root
-            depth_fwd[src_id] = 0;
-
-            q_bwd.push(dst_id);
-            parent_bwd[dst_id] = dst_id; // Use self as sentinel for visited and root
-            depth_bwd[dst_id] = 0;
+            q.push(src_id);
+            node_depths[src_id] = 0; 
+            vector<int> best; 
             
-            vector<int> best;
-            int meet_node = -1;
-            bool path_found = false;
-            
-            while (!q_fwd.empty() && !q_bwd.empty() && !path_found)
+            while (!q.empty())
             {
-                // Stop if the sum of depths of the two frontiers exceeds max_hops
-                if (depth_fwd[q_fwd.front()] + depth_bwd[q_bwd.front()] > max_hops) {
-                    break;
+                int cur_node_id = q.front(); 
+                q.pop();
+                int cur_depth = node_depths[cur_node_id];
+
+                if (cur_depth >= max_hops) 
+                {
+                    continue;
                 }
 
-                // Expand forward search by one level
-                int current_fwd_depth = depth_fwd[q_fwd.front()];
-                int fanout_limit_fwd = static_cast<int>(ceil(max_fanout * pow(decay_factor, current_fwd_depth)));
-                int q_fwd_size = q_fwd.size();
-                for (int i = 0; i < q_fwd_size; ++i) {
-                    int u = q_fwd.front(); q_fwd.pop();
-                    if (adj.count(u)) {
-                        int neighbors_added = 0;
-                        for (auto it = adj.at(u).rbegin(); it != adj.at(u).rend(); ++it) {
-                            if (neighbors_added >= fanout_limit_fwd) break;
-                            const auto& pr = *it;
-                            int v = get<0>(pr);
-                            if (!parent_fwd.count(v)) {
-                                parent_fwd[v] = u;
-                                depth_fwd[v] = depth_fwd[u] + 1;
-                                q_fwd.push(v);
-                                neighbors_added++;
-                                if (parent_bwd.count(v)) {
-                                    meet_node = v; path_found = true; break;
+                if (adj.count(cur_node_id)) {
+                    for (auto &pr : adj.at(cur_node_id)) 
+                    {
+                        int neighbor_node_id = get<0>(pr); 
+                        if (!node_depths.count(neighbor_node_id)) 
+                        {
+                            parent_map[neighbor_node_id] = cur_node_id; 
+                            node_depths[neighbor_node_id] = cur_depth + 1;
+
+                            if (neighbor_node_id == dst_id) 
+                            {
+                                int temp_node_id = dst_id; 
+                                while (temp_node_id != src_id) 
+                                {
+                                    best.push_back(temp_node_id);
+                                    temp_node_id = parent_map.at(temp_node_id); 
                                 }
+                                best.push_back(src_id);
+                                reverse(best.begin(), best.end());
+                                break; 
                             }
+                            q.push(neighbor_node_id); 
                         }
                     }
-                    if (path_found) break;
                 }
-                if (path_found) break;
-
-                // Expand backward search by one level
-                int current_bwd_depth = depth_bwd[q_bwd.front()];
-                int fanout_limit_bwd = static_cast<int>(ceil(max_fanout * pow(decay_factor, current_bwd_depth)));
-                int q_bwd_size = q_bwd.size();
-                for (int i = 0; i < q_bwd_size; ++i) {
-                    int u = q_bwd.front(); q_bwd.pop();
-                    if (adj.count(u)) {
-                        int neighbors_added = 0;
-                        for (auto it = adj.at(u).rbegin(); it != adj.at(u).rend(); ++it) {
-                            if (neighbors_added >= fanout_limit_bwd) break;
-                            const auto& pr = *it;
-                            int v = get<0>(pr);
-                            if (!parent_bwd.count(v)) {
-                                parent_bwd[v] = u;
-                                depth_bwd[v] = depth_bwd[u] + 1;
-                                q_bwd.push(v);
-                                neighbors_added++;
-                                if (parent_fwd.count(v)) {
-                                    meet_node = v; path_found = true; break;
-                                }
-                            }
-                        }
-                    }
-                    if (path_found) break;
+                if (!best.empty()) 
+                {
+                    break; 
                 }
-            }
-
-            if (meet_node != -1) 
-            {
-                // Reconstruct path from src_id to meet_node
-                int temp_node_id = meet_node;
-                while (temp_node_id != src_id) {
-                    best.push_back(temp_node_id);
-                    temp_node_id = parent_fwd.at(temp_node_id);
-                }
-                best.push_back(src_id);
-                reverse(best.begin(), best.end());
-
-                // Reconstruct path from meet_node to dst_id and append
-                vector<int> path_to_dst;
-                temp_node_id = meet_node;
-                while (temp_node_id != dst_id) {
-                    temp_node_id = parent_bwd.at(temp_node_id);
-                    path_to_dst.push_back(temp_node_id);
-                }
-                best.insert(best.end(), path_to_dst.begin(), path_to_dst.end());
             }
 
             if (!best.empty()) 

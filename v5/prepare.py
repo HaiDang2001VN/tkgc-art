@@ -11,8 +11,8 @@ def run_thread(args):
     Invoke the C++ worker and parse its tab-delimited output.
     Returns a dict mapping edge_id to the path info.
     """
-    binary, csv, max_hops, tid, nthreads = args
-    cmd = [binary, csv, str(max_hops), str(tid), str(nthreads)]
+    binary, csv, max_hops, tid, nthreads, decay_factor, max_fanout = args
+    cmd = [binary, csv, str(max_hops), str(tid), str(nthreads), str(decay_factor), str(max_fanout)]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
     results = {}
 
@@ -94,12 +94,14 @@ def main():
     num_threads = config.get('num_threads', 1)
     csv_path = os.path.join(data_dir, f"{config['dataset']}_edges.csv")
     max_hops = config.get('max_hops', 4)
+    decay_factor = config.get('decay_factor', 1.0)
+    max_fanout = config.get('max_fanout', 50)
 
     # Prepare per-thread invocation args
     run_threads = min(
         num_threads, args.sampling) if args.sampling is not None else num_threads
     tasks = [
-        (args.binary, csv_path, max_hops, tid, num_threads)
+        (args.binary, csv_path, max_hops, tid, num_threads, decay_factor, max_fanout)
         for tid in range(run_threads)
     ]
 
@@ -107,6 +109,8 @@ def main():
         f"Starting parallel shortest path computation with {run_threads} threads...")
     print(f"Processing CSV: {csv_path}")
     print(f"Max hops: {max_hops}")
+    print(f"Decay Factor: {decay_factor}")
+    print(f"Max Fanout: {max_fanout}")
 
     # Run in parallel
     with Pool(run_threads) as pool:

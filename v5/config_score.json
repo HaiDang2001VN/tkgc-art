@@ -8,6 +8,8 @@
   "max_hops": 4,
   "num_neg": 50,
   "num_threads": 8,
+  "decay_factor": 0.2,
+  "max_fanout": 100,
   "beam_width": 20,
   "max_epochs": 2,
   "batch_size": 8,
