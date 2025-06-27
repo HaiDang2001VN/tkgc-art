@@ -235,7 +235,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     # ----------------------------------------------------------------------
     # iterate over splits - first pass: collect all positive edges
     # ----------------------------------------------------------------------
-    positive_edges_by_split = {}  # split -> list of positive edge tuples
+    positive_edges_by_split = {s: [] for s in ("pre", "train", "valid", "test")}
     
     for split in ("train", "valid", "test"):
         fpath = root_dir / f"{split}.txt"
@@ -253,9 +253,6 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             threshold = np.quantile(df["ts"], train_ratio)
         else:
             threshold = None
-
-        # Store positive edges for this split
-        positive_edges_by_split[split] = []
         
         for row in tqdm(df.itertuples(index=False), total=len(df), desc=f"{split} pos"):
             split_label = (
@@ -263,9 +260,8 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             )
             _append(row.head, row.tail, row.rel, int(row.ts), split_label, 1)
             
-            # Store for later negative sampling
-            if split in ("valid", "test"):
-                positive_edges_by_split[split].append((row.head, row.tail, row.rel, int(row.ts), split))
+            # Store all positive edges in their respective split list for potential negative sampling
+            positive_edges_by_split[split_label].append((row.head, row.tail, row.rel, int(row.ts), split_label))
 
     print(f"Collected neighbor information from {len(neighbor_dict)} nodes")
     
@@ -275,9 +271,12 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     if neg_per_pos > 0:
         seed = 42  # Global random seed
         
-        for split in ("valid", "test"):
+        for split in ("train", "valid", "test"):
             print(f"Generating negatives for {split} split using {num_workers} workers...")
             pos_edges = positive_edges_by_split[split]
+
+            if not pos_edges:
+                continue
             
             # Prepare arguments for multiprocessing
             mp_args = [(head, tail, rel, ts, split_name, neighbor_dict.get(head, set()),
