@@ -395,6 +395,10 @@ class PathPredictor(LightningModule):
         mask = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
         weights = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
         
+        # Tensors to store the final raw score and length for each sample's longest prefix
+        score_for_longest_prefix = torch.zeros(num_samples, device=self.device)
+        length_for_longest_prefix = torch.zeros(num_samples, dtype=torch.int, device=self.device)
+        
         labels = []
         for meta in all_samples:
             label = meta.get('label', 0)
@@ -404,20 +408,35 @@ class PathPredictor(LightningModule):
                 labels.append(torch.tensor(label, device=self.device))
         labels = torch.stack(labels)
         
+        # First pass: fill tensors and determine longest prefix raw score/length
         for i, prefix_len in enumerate(prefix_lengths):
             if prefix_len not in outputs or 'z_scores' not in outputs[prefix_len] or 'meta' not in outputs[prefix_len]:
                 continue
-            prefix_scores = outputs[prefix_len]['z_scores']
+            prefix_z_scores = outputs[prefix_len]['z_scores']
+            prefix_raw_scores_flat = outputs[prefix_len]['raw_scores']
             meta_data = outputs[prefix_len]['meta']
-            for j, (score, meta) in enumerate(zip(prefix_scores, meta_data)):
+
+            raw_score_cursor = 0
+            for z_score, meta in zip(prefix_z_scores, meta_data):
+                # Get sample_idx
                 u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
                 v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
                 ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
                 sample_key = (u, v, ts)
                 sample_idx = sample_to_idx.get(sample_key, -1)
+
                 if sample_idx >= 0:
-                    z_scores[sample_idx, i] = score
+                    # Fill z_scores and mask
+                    z_scores[sample_idx, i] = z_score
                     mask[sample_idx, i] = 1.0
+
+                    # Since prefix_lengths are sorted, this update will be for the longest prefix.
+                    # The positive sample's score is at the current cursor position.
+                    score_for_longest_prefix[sample_idx] = prefix_raw_scores_flat[raw_score_cursor]
+                    length_for_longest_prefix[sample_idx] = prefix_len
+                
+                # Move cursor to the start of the next sample's scores in the flat tensor
+                raw_score_cursor += meta.get('num_paths', 1)
 
         decay_rate = self.hparams.loss_decay
         for i, prefix_len in enumerate(prefix_lengths):
@@ -443,18 +462,6 @@ class PathPredictor(LightningModule):
             edge_type = meta.get('edge_type')
             if hasattr(edge_type, 'item'):
                 edge_type = edge_type.item()
-            
-            # Find the score and length for the longest prefix
-            sample_mask = mask[i]
-            present_indices = sample_mask.nonzero(as_tuple=True)[0]
-            
-            score_for_longest_prefix = 0.0
-            length_for_longest_prefix = 0
-            if len(present_indices) > 0:
-                max_len_idx = present_indices.max()
-                # Use scaled_z_scores as this is the basis for evaluation scores
-                score_for_longest_prefix = scaled_z_scores[i, max_len_idx].item()
-                length_for_longest_prefix = prefix_lengths[max_len_idx]
 
             item = {
                 'u': u,
@@ -463,8 +470,8 @@ class PathPredictor(LightningModule):
                 'edge_type': edge_type,
                 'label': labels[i].item(),
                 'loss': -weighted_avg[i],  # Keep as tensor for epoch-end aggregation
-                'score': score_for_longest_prefix,
-                'length': length_for_longest_prefix,
+                'score': score_for_longest_prefix[i].item(),
+                'length': length_for_longest_prefix[i].item(),
             }
             batch_items.append(item)
         
