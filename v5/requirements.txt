@@ -1,0 +1,5 @@
+torch-geometric
+lightning
+wandb
+matplotlib
+seaborn

@@ -30,7 +30,7 @@ vector<string> split(const string& s, char delimiter); // Changed delimiter to c
 struct Row
 {
     int edge_id, ts, label;
-    int u, v, edge_type; 
+    int u, v, edge_type;
     string split;
 };
 
