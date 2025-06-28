@@ -156,7 +156,7 @@ class KGEModelProxy(nn.Module):
             # Number of nodes is max_id + 1 (since IDs are zero-indexed)
             num_nodes = max_node_id + 1
             cfg['num_nodes'] = num_nodes
-            print(f"Auto-inferred number of nodes: {num_nodes}")
+            print(f"Partition: {name_suffix}\tAuto-inferred number of nodes: {num_nodes}")
 
         batch_size = cfg.get('batch_size', 1024)
         train_ds = TensorDataset(
@@ -243,8 +243,9 @@ def main(config_path: str):
     df = pd.read_csv(os.path.join(main_cfg['storage_dir'], f"{main_cfg['dataset']}_edges.csv"))
     df_pos = df[df['label']==1]
 
+    split_code = {"pre": 0, "train": 1, "valid": 2, "test": 3}
     def triples_for(split: str) -> torch.Tensor:
-        d = df_pos[df_pos['split']==split]
+        d = df_pos[df_pos['split']==split_code[split]]
         return torch.tensor(d[['u','edge_type','v']].values, dtype=torch.long)
 
     partitions = {
