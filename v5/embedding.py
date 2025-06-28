@@ -140,12 +140,18 @@ class KGEModelProxy(nn.Module):
         
         # Infer num_nodes from the data if not provided in config
         if 'num_nodes' not in cfg:
+            max_node_id = -1
+            
             # Find max node ID from both head and tail columns
-            max_node_id = int(train_triples[:, [0, 2]].max().item())
+            train_nodes = train_triples[:, [0, 2]]
+            if train_nodes.numel() > 0:
+                max_node_id = int(train_nodes.max().item())
             
             # If validation triples are available, check there too
             if val_triples is not None:
-                max_node_id = max(max_node_id, int(val_triples[:, [0, 2]].max().item()))
+                val_nodes = val_triples[:, [0, 2]]
+                if val_nodes.numel() > 0:
+                    max_node_id = max(max_node_id, int(val_nodes.max().item()))
             
             # Number of nodes is max_id + 1 (since IDs are zero-indexed)
             num_nodes = max_node_id + 1
