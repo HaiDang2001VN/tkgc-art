@@ -110,8 +110,7 @@ class KGEModelProxy(nn.Module):
         self.model.train()
         total_loss = 0.0
         for heads, rels, tails in loader:
-            heads, rels, tails = heads.to(
-                device), rels.to(device), tails.to(device)
+            heads, rels, tails = heads.to(device), rels.to(device), tails.to(device)
             optimizer.zero_grad()
             loss = self.model.loss(heads, rels, tails)
             loss.backward()
@@ -135,8 +134,7 @@ class KGEModelProxy(nn.Module):
         if cfg is None:
             cfg = {}
         if device is None:
-            device = torch.device(
-                'cuda' if torch.cuda.is_available() else 'cpu')
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Infer num_nodes from the data if not provided in config
         if 'num_nodes' not in cfg:
@@ -156,13 +154,30 @@ class KGEModelProxy(nn.Module):
             # Number of nodes is max_id + 1 (since IDs are zero-indexed)
             num_nodes = max_node_id + 1
             cfg['num_nodes'] = num_nodes
-            print(f"Partition: {name_suffix}\tAuto-inferred number of nodes: {num_nodes}")
+            print(f"Partition: {name_suffix:5}\tAuto-inferred number of nodes: {num_nodes}")
+            
+        # Infer num_relations from the data if not provided in config
+        if 'num_relations' not in cfg:
+            max_edge_id = -1
+            
+            # Find max edge ID
+            train_edges = train_triples[:, 1]
+            if train_edges.numel() > 0:
+                max_edge_id = int(train_nodes.max().item())
+            
+            # If validation triples are available, check there too
+            if val_triples is not None:
+                val_edges = val_triples[:, 1]
+                if val_edges.numel() > 0:
+                    max_edge_id = max(max_edge_id, int(val_edges.max().item()))
+
+            num_relations = max_edge_id + 1
+            cfg['num_relations'] = num_relations
+            print(f"Partition: {name_suffix:5}\tAuto-inferred number of relations: {num_relations}")
 
         batch_size = cfg.get('batch_size', 1024)
-        train_ds = TensorDataset(
-            train_triples[:, 0], train_triples[:, 1], train_triples[:, 2])
-        train_loader = DataLoader(
-            train_ds, batch_size=batch_size, shuffle=True)
+        train_ds = TensorDataset(train_triples[:, 0], train_triples[:, 1], train_triples[:, 2])
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 
         val_loader = None
         if val_triples is not None:
