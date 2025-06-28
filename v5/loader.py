@@ -418,9 +418,11 @@ class PathDataModule(LightningDataModule):
                 self.df = pd.read_csv(edges_fp, index_col='edge_id')            
                 self.split_map = {str(idx): row['split'] for idx, row in self.df.iterrows()}
 
+            split_code = {'pre': 0, 'train': 1, 'valid': 2, 'test': 3}
             for split in ['train', 'valid', 'test']:
                 print(f"Setting up data for split: {split}")
-                self.data[split] = self.df[self.df['split'] == split].copy()
+                
+                self.data[split] = self.df[self.df['split'] == split_code[split]].copy()
 
                 pos_paths = {}
                 with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
