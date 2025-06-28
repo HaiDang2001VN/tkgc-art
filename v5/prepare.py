@@ -37,11 +37,15 @@ def run_thread(args):
         # parse edge_types as list of strings
         edge_types = parts[4].split(",") if parts[4] else []
 
+        # parse edge_timestamps as list of strings
+        edge_timestamps = parts[5].split(",") if parts[5] else []
+
         results[eid] = {
             "hops": hops,
             "nodes": nodes,
             "node_types": node_types,
-            "edge_types": edge_types
+            "edge_types": edge_types,
+            "edge_timestamps": edge_timestamps
         }
 
     proc.wait()
@@ -77,6 +81,10 @@ def write_paths_text_file(final_map, output_path):
             # Write meta-pattern (edge types) on single line, space-separated
             edge_types_line = " ".join(map(str, path_info['edge_types']))
             f.write(f"{edge_types_line}\n")
+
+            # Write meta-pattern (edge timestamps) on single line, space-separated
+            edge_timestamps_line = " ".join(map(str, path_info['edge_timestamps']))
+            f.write(f"{edge_timestamps_line}\n")
 
 
 def main():
