@@ -1,5 +1,11 @@
 --extra-index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://data.pyg.org/whl/torch-2.4.0+cu124.html
 torch
+torch-geometric
+torch-scatter
+torch-sparse
+torch-cluster
+torch-spline-conv
 numpy
 pandas
 scikit-learn
