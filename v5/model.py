@@ -21,27 +21,30 @@ from loader import PathDataModule
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000, batch_first: bool = True):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5, batch_first: bool = True):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
         self.batch_first = batch_first
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(
-            0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        if batch_first:
-            pe = pe.unsqueeze(0)
-        else:
-            pe = pe.unsqueeze(1)
-        self.register_buffer('pe', pe)
+        # Learnable positional embeddings
+        self.pos_embedding = nn.Embedding(max_len, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Determine sequence length based on batch_first
+        seq_len = x.size(1) if self.batch_first else x.size(0)
+        
+        # Create position indices
+        positions = torch.arange(seq_len, device=x.device)
+        
+        # Get positional embeddings
+        pos_embeddings = self.pos_embedding(positions)
+        
+        # Reshape for broadcasting
         if self.batch_first:
-            x = x + self.pe[:, :x.size(1), :]
+            pos_embeddings = pos_embeddings.unsqueeze(0)  # (1, seq_len, d_model)
         else:
-            x = x + self.pe[:x.size(0)]
+            pos_embeddings = pos_embeddings.unsqueeze(1)  # (seq_len, 1, d_model)
+            
+        x = x + pos_embeddings
         return self.dropout(x)
 
 

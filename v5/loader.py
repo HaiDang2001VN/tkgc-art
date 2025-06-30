@@ -441,7 +441,7 @@ class PathDataModule(LightningDataModule):
                         edge_timestamps_str = f.readline().strip().split()
                         edge_timestamps = [int(ts) for ts in edge_timestamps_str if ts]
 
-                        if self.split_map.get(eid) == split:
+                        if self.split_map.get(eid) == split_code[split]:
                             pos_paths[eid] = {
                                 "hops": hops,
                                 "nodes": nodes,
