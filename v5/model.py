@@ -16,9 +16,6 @@ import torch.multiprocessing as mp
 # Evaluation utility
 from evaluation import evaluate  # assumes eval.py provides evaluate()
 
-# Import from utils
-from utils import norm as utils_norm
-
 # Assumes PathDataModule code is saved in path_datamodule.py
 from loader import PathDataModule
 
@@ -70,10 +67,8 @@ class PathPredictor(LightningModule):
         num_layers: int = 4,
         dim_feedforward: int = 512,
         dropout: float = 0.1,
-        lp_norm: int = None,
         max_hops: int = 10,
         max_adjust: float = 0.1,
-        norm_fn=None,
         adjust_no_neg_paths_samples=True,
         lr=1e-4,
         scale_loss=False,
@@ -84,15 +79,6 @@ class PathPredictor(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        
-        # Use lp_norm if specified, otherwise use custom norm_fn if provided
-        if lp_norm is not None:
-            self.norm_fn = lambda tensor, dim: torch.norm(tensor, p=lp_norm, dim=dim)
-        elif norm_fn is not None:
-            self.norm_fn = norm_fn
-        else:
-            # Fallback to L2 norm if neither is provided
-            self.norm_fn = lambda tensor, dim: torch.norm(tensor, p=2, dim=dim)
             
         self.scale_loss = scale_loss
             
@@ -655,9 +641,6 @@ def main():
     
     hidden_dim = cfg.get('hidden_dim', emb_dim)
     
-    # Check if lp_norm is in config
-    has_lp_norm = 'lp_norm' in cfg
-    
     # Initialize model parameters
     model_params = {
         'emb_dim': emb_dim,
@@ -676,14 +659,6 @@ def main():
         'loss_decay': cfg.get('loss_decay', 0.5),
     }
     
-    # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
-    if has_lp_norm:
-        model_params['lp_norm'] = cfg['lp_norm']
-    else:
-        # Use utils.norm with model_name from embedding config
-        norm_fn = lambda tensor, dim: utils_norm(tensor, model=None, model_name=model_name, dim=dim)
-        model_params['norm_fn'] = norm_fn
-
     model = PathPredictor(**model_params)
 
     # Extract storage directory

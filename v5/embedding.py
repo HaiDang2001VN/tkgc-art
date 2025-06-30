@@ -8,7 +8,7 @@ from torch import nn, Tensor
 from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.nn.kge import DistMult, ComplEx, RotatE, TransE
-from utils import load_configuration#, norm as utils_norm
+from utils import load_configuration
 import numpy as np
 import multiprocessing as mp
 
