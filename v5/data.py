@@ -152,7 +152,8 @@ def generate_negatives_for_edge(args):
         
         # Safety check (should not be needed with correct implementation)
         if v_neg not in head_neighbors_with_self:
-            negatives.append((head, int(v_neg), rel, ts, split_name))
+            # Include the original tail node as v_pos in the negative samples
+            negatives.append((head, int(v_neg), rel, ts, split_name, tail))
     
     return negatives
 
@@ -161,7 +162,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     """Read train/valid/test quadruple files and return a DataFrame.
 
     The resulting columns match the edge schema used elsewhere in the codebase:
-        feat_pos_u | feat_pos_v | u | v | u_type | v_type | ts | split | label | edge_type
+        feat_pos_u | feat_pos_v | u | v | u_type | v_type | ts | split | label | edge_type | v_pos
     """
 
     ds_name = configuration["dataset"]
@@ -205,10 +206,14 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
         return mapping[raw_id]
 
     # helper to append an edge record ----------------------------------------------------
-    def _append(u_raw: int, v_raw: int, r_raw: int, ts_val: int, split: str, label: int):
+    def _append(u_raw: int, v_raw: int, r_raw: int, ts_val: int, split: str, label: int, v_pos=None):
         u = _id_assign(node_map, u_raw)
         v = _id_assign(node_map, v_raw)
         e = _id_assign(edge_type_map, r_raw)
+
+        # For true edges (label=1), set v_pos to be same as v_raw if not provided
+        if label == 1 and v_pos is None:
+            v_pos = v_raw
 
         records.append({
             "feat_pos_u": u_raw,
@@ -221,6 +226,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             "split": split_code.get(split, split),  # Convert to int code if possible
             "label": label,
             "edge_type": e,
+            "v_pos": v_pos,      # Same as v for true edges, original v for negative samples
         })
         
         # Update neighbor dictionary for positive edges only
@@ -292,8 +298,8 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             
             # Process negative results
             for neg_edges in neg_results:
-                for head, v_neg, rel, ts, split_name in neg_edges:
-                    _append(head, v_neg, rel, ts, split_name, 0)
+                for head, v_neg, rel, ts, split_name, v_pos in neg_edges:
+                    _append(head, v_neg, rel, ts, split_name, 0, v_pos)
 
     print(f"Loaded {len(records):,} total (pos+neg) edges")
     save_edges(configuration, node_map, edge_type_map)

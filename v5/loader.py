@@ -186,10 +186,16 @@ class EdgeDataset(Dataset):
             item['ts'] = torch.tensor(self.df.at[eid, 'timestamp'], dtype=torch.long)
         
         # Extract edge type and its embedding if available
-        # edge_type = None
+        edge_type = None
         if 'edge_type' in self.df.columns:
             edge_type = int(self.df.at[eid, 'edge_type'])
             item['edge_type'] = torch.tensor(edge_type, dtype=torch.long)
+        
+        # Add v_pos from the new schema
+        if 'v_pos' in self.df.columns:
+            v_pos_val = self.df.at[eid, 'v_pos']
+            if pd.notna(v_pos_val) and v_pos_val != "None":
+                item['v_pos'] = torch.tensor(int(v_pos_val), dtype=torch.long)
         
         if pos_nodes is None: # If no positive path, skip this item
             return item # Still returns the label in order for later evaluation if needed

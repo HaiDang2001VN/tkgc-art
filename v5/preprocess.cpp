@@ -456,6 +456,12 @@ int main(int argc, char *argv[])
                 int u_type = std::stoi(row_map_data.at("u_type")); 
                 int v_type = std::stoi(row_map_data.at("v_type")); 
 
+                // Read v_pos if it exists but discard the information
+                if (row_map_data.count("v_pos") > 0 && !row_map_data.at("v_pos").empty() && row_map_data.at("v_pos") != "None") {
+                    // We read but don't use this value
+                    /*int v_pos = std::stoi(row_map_data.at("v_pos"));*/
+                }
+
                 node_to_type[u] = u_type;
                 node_to_type[v] = v_type;
                 adj[u][edge_type][v_type].emplace(ts_val, v);

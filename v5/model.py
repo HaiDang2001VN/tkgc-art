@@ -369,7 +369,8 @@ class PathPredictor(LightningModule):
                 u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
                 v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
                 ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
-                sample_key = (u, v, ts)
+                v_pos = meta.get('v_pos', v).item() if hasattr(meta.get('v_pos', v), 'item') else meta.get('v_pos', v)
+                sample_key = (u, v, ts, v_pos)  # Include v_pos in the key
                 if sample_key not in sample_to_idx:
                     sample_to_idx[sample_key] = len(all_samples)
                     all_samples.append(meta)
@@ -411,7 +412,8 @@ class PathPredictor(LightningModule):
                 u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
                 v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
                 ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
-                sample_key = (u, v, ts)
+                v_pos = meta.get('v_pos', v).item() if hasattr(meta.get('v_pos', v), 'item') else meta.get('v_pos', v)
+                sample_key = (u, v, ts, v_pos)  # Include v_pos in the key
                 sample_idx = sample_to_idx.get(sample_key, -1)
 
                 if sample_idx >= 0:
@@ -451,10 +453,16 @@ class PathPredictor(LightningModule):
             edge_type = meta.get('edge_type')
             if hasattr(edge_type, 'item'):
                 edge_type = edge_type.item()
+                
+            # Get v_pos value, defaulting to v for positive edges
+            v_pos = meta.get('v_pos', v)
+            if hasattr(v_pos, 'item'):
+                v_pos = v_pos.item()
 
             item = {
                 'u': u,
                 'v': v,
+                'v_pos': v_pos,  # Add v_pos to the item
                 'ts': ts,
                 'edge_type': edge_type,
                 'label': labels[i].item(),
@@ -518,8 +526,11 @@ class PathPredictor(LightningModule):
         # --- Group scores by edge for evaluation ---
         edge_groups = defaultdict(lambda: {'pos_score': None, 'neg_scores': []})
         for item in all_items:
-            key = (item['u'], item.get('edge_type'), item['v'], item['ts'])
+            # Use v_pos as the target node for grouping, which is the true target for all edges
+            v_for_grouping = item.get('v_pos', item['v'])
+            key = (item['u'], item.get('edge_type'), v_for_grouping, item['ts'])
             score = item['score']
+            
             if item['label'] == 1:
                 edge_groups[key]['pos_score'] = score
             else:
