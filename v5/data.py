@@ -185,6 +185,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
         "train_ratio", 0.0))  # 0.0 → all 'train'
     neg_per_pos = int(configuration.get("neg_per_pos", 1))
     split_code = {"pre": 0, "train": 1, "valid": 2, "test": 3}
+    add_inverse_edges = configuration.get("add_inverse_edges", True)  # Control whether to add inverse edges
 
     # Determine the number of workers for multiprocessing
     num_workers = configuration.get("num_threads", None)
@@ -199,6 +200,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     neighbor_dict: Dict[int, set] = {}  # node -> set of all neighbors across all time
     
     records = []
+    original_edges = []  # To store original edges for later creating inverse edges
 
     def _id_assign(mapping: Dict[int, int], raw_id: int) -> int:
         if raw_id not in mapping:
@@ -206,7 +208,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
         return mapping[raw_id]
 
     # helper to append an edge record ----------------------------------------------------
-    def _append(u_raw: int, v_raw: int, r_raw: int, ts_val: int, split: str, label: int, v_pos=None):
+    def _append(u_raw: int, v_raw: int, r_raw: int, ts_val: int, split: str, label: int, v_pos=None, store_for_inverse=True):
         u = _id_assign(node_map, u_raw)
         v = _id_assign(node_map, v_raw)
         e = _id_assign(edge_type_map, r_raw)
@@ -215,7 +217,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
         if label == 1 and v_pos is None:
             v_pos = v_raw
 
-        records.append({
+        record = {
             "feat_pos_u": u_raw,
             "feat_pos_v": v_raw,
             "u": u,
@@ -227,7 +229,13 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             "label": label,
             "edge_type": e,
             "v_pos": v_pos,      # Same as v for true edges, original v for negative samples
-        })
+        }
+        
+        records.append(record)
+        
+        # Store original edges for later creating inverse edges
+        if store_for_inverse and label == 1 and add_inverse_edges:
+            original_edges.append((u_raw, v_raw, r_raw, ts_val, split, label, v_pos))
         
         # Update neighbor dictionary for positive edges only
         if label == 1:
@@ -272,6 +280,22 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     print(f"Collected neighbor information from {len(neighbor_dict)} nodes")
     
     # ----------------------------------------------------------------------
+    # Generate inverse edges for all original positive edges
+    # ----------------------------------------------------------------------
+    if add_inverse_edges:
+        print(f"Adding inverse edges for {len(original_edges)} original edges...")
+        num_original_rel_types = len(edge_type_map)
+        
+        # Create inverse edges by swapping u and v, and adding offset to relation type
+        for u_raw, v_raw, r_raw, ts_val, split, label, v_pos in tqdm(original_edges, desc="Creating inverse edges"):
+            # Use r_raw + n_rel as the inverse relation ID
+            inverse_r_raw = r_raw + n_rel
+            # When creating inverse edge, we don't want to store it for creating inverses again
+            _append(v_raw, u_raw, inverse_r_raw, ts_val, split, label, u_raw, store_for_inverse=False)
+        
+        print(f"Added {len(original_edges)} inverse edges. Total relations: {len(edge_type_map)}")
+    
+    # ----------------------------------------------------------------------
     # second pass: generate negatives using global neighbor information
     # ----------------------------------------------------------------------
     if neg_per_pos > 0:
@@ -299,7 +323,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             # Process negative results
             for neg_edges in neg_results:
                 for head, v_neg, rel, ts, split_name, v_pos in neg_edges:
-                    _append(head, v_neg, rel, ts, split_name, 0, v_pos)
+                    _append(head, v_neg, rel, ts, split_name, 0, v_pos, store_for_inverse=False)
 
     print(f"Loaded {len(records):,} total (pos+neg) edges")
     save_edges(configuration, node_map, edge_type_map)
