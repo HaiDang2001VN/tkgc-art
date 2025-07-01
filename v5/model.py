@@ -16,35 +16,35 @@ import torch.multiprocessing as mp
 # Evaluation utility
 from evaluation import evaluate  # assumes eval.py provides evaluate()
 
-# Import from utils
-from utils import norm as utils_norm
-
 # Assumes PathDataModule code is saved in path_datamodule.py
 from loader import PathDataModule
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000, batch_first: bool = True):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5, batch_first: bool = True):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
         self.batch_first = batch_first
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(
-            0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        if batch_first:
-            pe = pe.unsqueeze(0)
-        else:
-            pe = pe.unsqueeze(1)
-        self.register_buffer('pe', pe)
+        # Learnable positional embeddings
+        self.pos_embedding = nn.Embedding(max_len, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Determine sequence length based on batch_first
+        seq_len = x.size(1) if self.batch_first else x.size(0)
+        
+        # Create position indices
+        positions = torch.arange(seq_len, device=x.device)
+        
+        # Get positional embeddings
+        pos_embeddings = self.pos_embedding(positions)
+        
+        # Reshape for broadcasting
         if self.batch_first:
-            x = x + self.pe[:, :x.size(1), :]
+            pos_embeddings = pos_embeddings.unsqueeze(0)  # (1, seq_len, d_model)
         else:
-            x = x + self.pe[:x.size(0)]
+            pos_embeddings = pos_embeddings.unsqueeze(1)  # (seq_len, 1, d_model)
+            
+        x = x + pos_embeddings
         return self.dropout(x)
 
 
@@ -70,10 +70,8 @@ class PathPredictor(LightningModule):
         num_layers: int = 4,
         dim_feedforward: int = 512,
         dropout: float = 0.1,
-        lp_norm: int = None,
         max_hops: int = 10,
         max_adjust: float = 0.1,
-        norm_fn=None,
         adjust_no_neg_paths_samples=True,
         lr=1e-4,
         scale_loss=False,
@@ -84,15 +82,6 @@ class PathPredictor(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        
-        # Use lp_norm if specified, otherwise use custom norm_fn if provided
-        if lp_norm is not None:
-            self.norm_fn = lambda tensor, dim: torch.norm(tensor, p=lp_norm, dim=dim)
-        elif norm_fn is not None:
-            self.norm_fn = norm_fn
-        else:
-            # Fallback to L2 norm if neither is provided
-            self.norm_fn = lambda tensor, dim: torch.norm(tensor, p=2, dim=dim)
             
         self.scale_loss = scale_loss
             
@@ -380,7 +369,8 @@ class PathPredictor(LightningModule):
                 u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
                 v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
                 ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
-                sample_key = (u, v, ts)
+                v_pos = meta.get('v_pos', v).item() if hasattr(meta.get('v_pos', v), 'item') else meta.get('v_pos', v)
+                sample_key = (u, v, ts, v_pos)  # Include v_pos in the key
                 if sample_key not in sample_to_idx:
                     sample_to_idx[sample_key] = len(all_samples)
                     all_samples.append(meta)
@@ -422,7 +412,8 @@ class PathPredictor(LightningModule):
                 u = meta.get('u', -1).item() if hasattr(meta.get('u', -1), 'item') else meta.get('u', -1)
                 v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
                 ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
-                sample_key = (u, v, ts)
+                v_pos = meta.get('v_pos', v).item() if hasattr(meta.get('v_pos', v), 'item') else meta.get('v_pos', v)
+                sample_key = (u, v, ts, v_pos)  # Include v_pos in the key
                 sample_idx = sample_to_idx.get(sample_key, -1)
 
                 if sample_idx >= 0:
@@ -462,10 +453,16 @@ class PathPredictor(LightningModule):
             edge_type = meta.get('edge_type')
             if hasattr(edge_type, 'item'):
                 edge_type = edge_type.item()
+                
+            # Get v_pos value, defaulting to v for positive edges
+            v_pos = meta.get('v_pos', v)
+            if hasattr(v_pos, 'item'):
+                v_pos = v_pos.item()
 
             item = {
                 'u': u,
                 'v': v,
+                'v_pos': v_pos,  # Add v_pos to the item
                 'ts': ts,
                 'edge_type': edge_type,
                 'label': labels[i].item(),
@@ -529,8 +526,11 @@ class PathPredictor(LightningModule):
         # --- Group scores by edge for evaluation ---
         edge_groups = defaultdict(lambda: {'pos_score': None, 'neg_scores': []})
         for item in all_items:
-            key = (item['u'], item.get('edge_type'), item['v'], item['ts'])
+            # Use v_pos as the target node for grouping, which is the true target for all edges
+            v_for_grouping = item.get('v_pos', item['v'])
+            key = (item['u'], item.get('edge_type'), v_for_grouping, item['ts'])
             score = item['score']
+            
             if item['label'] == 1:
                 edge_groups[key]['pos_score'] = score
             else:
@@ -655,9 +655,6 @@ def main():
     
     hidden_dim = cfg.get('hidden_dim', emb_dim)
     
-    # Check if lp_norm is in config
-    has_lp_norm = 'lp_norm' in cfg
-    
     # Initialize model parameters
     model_params = {
         'emb_dim': emb_dim,
@@ -676,14 +673,6 @@ def main():
         'loss_decay': cfg.get('loss_decay', 0.5),
     }
     
-    # If lp_norm is in config, use it, otherwise use norm_fn from embedding config
-    if has_lp_norm:
-        model_params['lp_norm'] = cfg['lp_norm']
-    else:
-        # Use utils.norm with model_name from embedding config
-        norm_fn = lambda tensor, dim: utils_norm(tensor, model=None, model_name=model_name, dim=dim)
-        model_params['norm_fn'] = norm_fn
-
     model = PathPredictor(**model_params)
 
     # Extract storage directory

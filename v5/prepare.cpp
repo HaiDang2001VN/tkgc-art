@@ -110,6 +110,12 @@ int main(int argc, char **argv)
                 row.v         = stoi(row_map_data.at("v")); 
                 row.ts        = stoi(row_map_data.at("ts"));
                 row.label     = stoi(row_map_data.at("label"));
+                
+                // Read v_pos if it exists but discard the information
+                if (row_map_data.count("v_pos") > 0 && !row_map_data.at("v_pos").empty() && row_map_data.at("v_pos") != "None") {
+                    // We read but don't store this value as requested
+                    /*int v_pos = stoi(row_map_data.at("v_pos"));*/
+                }
     
                 rows.push_back(row);
 
