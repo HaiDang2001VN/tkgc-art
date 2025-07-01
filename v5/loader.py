@@ -142,7 +142,6 @@ class EdgeDataset(Dataset):
         df: pd.DataFrame,
         pos_paths: dict,
         neg_paths: dict,
-        neg_path_timestamps: dict,
         features_map: Union[dict, None],
         kge_proxy: Union[KGEModelProxy, None],
         num_neg: Union[int, None] = None
@@ -151,7 +150,6 @@ class EdgeDataset(Dataset):
         self.edge_ids = df.index.tolist()
         self.pos_paths = pos_paths
         self.neg_paths = neg_paths
-        self.neg_path_timestamps = neg_path_timestamps
         self.features_map = features_map
         self.kge_proxy = kge_proxy
         self.num_neg = num_neg
@@ -520,7 +518,6 @@ class PathDataModule(LightningDataModule):
     def _dataloader(self, split: str, shuffle: bool):
         ds = EdgeDataset(
             self.data[split], self.pos_paths[split], self.neg_paths[split],
-            self.neg_path_timestamps[split],
             self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg
         )
         
