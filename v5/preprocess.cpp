@@ -431,7 +431,13 @@ int main(int argc, char *argv[])
     }
 
     log_stream << "[Info] " << getCurrentTimestamp() << " Building enhanced adjacency list with node types and global neighbors from " << csv_path << "..." << std::endl;
-    int line_number = 1; 
+    int line_number = 1;
+    std::unordered_map<std::string, int> split_code = {
+        {"pre", 0},
+        {"train", 1},
+        {"valid", 2},
+        {"test", 3}
+    };
     while (std::getline(csv_file, line)) 
     {
         line_number++;
@@ -471,7 +477,7 @@ int main(int argc, char *argv[])
                 global_neighbors[v].insert(u);
             }
 
-            if (row_map_data.count("split") && row_map_data.at("split") == partition)
+            if (row_map_data.count("split") && stoi(row_map_data.at("split")) == split_code[partition])
             { 
                 int edge_id = std::stoi(row_map_data.at("edge_id"));
                 if (edge_id % num_threads == thread_id) { 
