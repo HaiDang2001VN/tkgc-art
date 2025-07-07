@@ -273,7 +273,8 @@ std::map<int, std::vector<std::pair<int, int>>> generate_tree_negatives(
     const std::set<int> &global_neighbors_of_u,
     const EmbeddingMap &node_embeddings, const EmbeddingMap &relation_embeddings,
     const std::function<float(const std::vector<float> &, const std::vector<float> &, const std::vector<float> &)> &score_func,
-    const std::string &criteria)
+    const std::string &criteria,
+    std::ofstream &log_stream)
 {
     std::map<int, std::vector<std::pair<int, int>>> results; // prefix_length -> [(v', ts)]
     
@@ -328,6 +329,12 @@ std::map<int, std::vector<std::pair<int, int>>> generate_tree_negatives(
                     scored_candidates.emplace_back(timestamp_score, candidate_node, edge_timestamp);
                 }
             }
+        }
+        
+        // Log if no candidates were found for this prefix length
+        if (scored_candidates.empty()) {
+            log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for (u=" << u 
+                      << ", ts=" << ts << ", prefix_len=" << prefix_len << ")" << std::endl;
         }
         
         // Sort by score (descending) and keep top beam_width
@@ -551,11 +558,17 @@ int main(int argc, char *argv[])
 
         auto tree_negatives = generate_tree_negatives(u_node, ts_val, beam_width, positive_path, adj,
                                                      node_to_type, global_neighbors_of_u,
-                                                     node_embeddings, relation_embeddings, score_func, criteria);
+                                                     node_embeddings, relation_embeddings, score_func, criteria,
+                                                     log_stream);
         
         if (!tree_negatives.empty())
         {
             final_results[eid] = tree_negatives;
+        }
+        else
+        {
+            log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for any prefix length of edge ID " 
+                      << eid << " (u=" << u_node << ", ts=" << ts_val << ")" << std::endl;
         }
     }
 
