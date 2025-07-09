@@ -630,6 +630,7 @@ class PathPredictor(LightningModule):
 def main():
     # Set start method to 'spawn' before any other multiprocessing code runs
     mp.set_start_method('spawn', force=True)
+    torch.backends.cuda.matmul.allow_tf32 = False
     torch.set_float32_matmul_precision('high')
     
     parser = argparse.ArgumentParser(
