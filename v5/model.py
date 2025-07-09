@@ -188,7 +188,7 @@ class PathPredictor(LightningModule):
                 type_embedding = sample_meta.get('type_embedding', None)
                 num_paths.append(sample_meta.get('num_paths', 1))
                 if type_embedding is not None:
-                    type_embeddings.append([type_embedding] * num_paths[-1])
+                    type_embeddings.extend([type_embedding] * num_paths[-1])
 
             if not type_embeddings:
                 # No type embeddings available, skip this prefix length
