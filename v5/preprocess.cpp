@@ -332,9 +332,17 @@ std::map<int, std::vector<std::pair<int, int>>> generate_tree_negatives(
         }
         
         // Log if no candidates were found for this prefix length
-        if (scored_candidates.empty()) {
-            log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for (u=" << u 
-                      << ", ts=" << ts << ", prefix_len=" << prefix_len << ")" << std::endl;
+        // if (scored_candidates.empty()) {
+        //     log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for (u=" << u 
+        //               << ", ts=" << ts << ", prefix_len=" << prefix_len << ")" << std::endl;
+        // }
+
+        // Log if candidates were found for this prefix length
+        if (!scored_candidates.empty()) {
+            log_stream << "[Info] " << getCurrentTimestamp() << " Found " << scored_candidates.size() 
+                       << " candidates for (u=" << u << ", ts=" << ts 
+                       << ", prefix_len=" << prefix_len << ") with edge type " << next_edge_type
+                       << " and expected node type " << expected_node_type << std::endl;
         }
         
         // Sort by score (descending) and keep top beam_width
@@ -564,11 +572,13 @@ int main(int argc, char *argv[])
         if (!tree_negatives.empty())
         {
             final_results[eid] = tree_negatives;
+            log_stream << "[Info] " << getCurrentTimestamp() << " Found " << tree_negatives.size() 
+                       << " negative paths for edge ID " << eid << " (u=" << u_node << ", ts=" << ts_val << ")" << std::endl;
         }
         else
         {
-            log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for any prefix length of edge ID " 
-                      << eid << " (u=" << u_node << ", ts=" << ts_val << ")" << std::endl;
+            // log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for any prefix length of edge ID " 
+            //           << eid << " (u=" << u_node << ", ts=" << ts_val << ")" << std::endl;
         }
     }
 
