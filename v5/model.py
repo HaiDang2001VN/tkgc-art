@@ -21,7 +21,7 @@ from loader import PathDataModule
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5, batch_first: bool = True):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 10, batch_first: bool = True):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
         self.batch_first = batch_first
@@ -89,7 +89,7 @@ class PathPredictor(LightningModule):
         self.input_proj = nn.Linear(
             self.hparams.emb_dim, self.hparams.hidden_dim)
         self.pos_encoder = PositionalEncoding(
-            self.hparams.hidden_dim, dropout, max_len=max_hops + 1, batch_first=True)
+            self.hparams.hidden_dim, dropout, max_len=2 * (max_hops + 1), batch_first=True)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.hparams.hidden_dim,
             nhead=nhead,
@@ -195,12 +195,12 @@ class PathPredictor(LightningModule):
                 continue
             
             # Use tensor operations for embeddings
-            type_embeddings = torch.stack([torch.stack(embs) for embs in type_embeddings])
+            type_embeddings = torch.stack(type_embeddings, dim=0)
             edge_embeddings = torch.cat([type_embeddings, edge_embeddings], dim=1)
             
             # Create interleaved edge-node embeddings
             batch_size, length, emb_dim = node_embeddings.size()
-            embeddings = torch.zeros(batch_size, length, emb_dim, dtype=node_embeddings.dtype,
+            embeddings = torch.zeros(batch_size, 2 * length, emb_dim, dtype=node_embeddings.dtype,
                                     device=node_embeddings.device)
             
             # Edge embeddings start first - use tensor operations
