@@ -222,7 +222,7 @@ class PathPredictor(LightningModule):
                 pred_emb = self.forward(embeddings, use_causal_mask=False)
             except Exception as e:
                 print(f"Error in forward pass: {e}")
-                print(f"Input shape: {embeddings.shape} at prefix len {prefix_len}")
+                print(f"Input shape: {embeddings.shape} at prefix len {prefix_len} and length {length}")
                 raise e
             pred_scores = self.score_proj(pred_emb[:, 0, :])
             
