@@ -63,35 +63,35 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             pos_edge_embs = item['pos_edge_embs'] if 'pos_edge_embs' in item else None
             
             # Trim positive embeddings to match the prefix length for fair comparison
-            if pos_node_embs is not None and pos_node_embs.size(0) > prefix_len:
+            if pos_node_embs is not None and pos_node_embs.size(0) > (prefix_len + 1):
                 # Keep only the prefix part of the positive path
-                pos_node_embs = pos_node_embs[:prefix_len]
-                
-            if pos_edge_embs is not None and pos_edge_embs.size(0) > (prefix_len - 1):
-                # For edges, we need prefix_len-1 edges to connect prefix_len nodes
-                pos_edge_embs = pos_edge_embs[:prefix_len-1]
-            
+                pos_node_embs = pos_node_embs[:prefix_len + 1]
+
+            if pos_edge_embs is not None and pos_edge_embs.size(0) > prefix_len:
+                # For edges, we need prefix_len edges to connect prefix_len + 1 nodes
+                pos_edge_embs = pos_edge_embs[:prefix_len]
+
             # Get negative path embeddings for this prefix length
             neg_node_embs = item['neg_node_embs_by_prefix'].get(prefix_len, [])
             neg_edge_embs = item['neg_edge_embs_by_prefix'].get(prefix_len, [])
             
             # Add assertions to verify the trimmed embeddings match the expected structure
             if pos_node_embs is not None and neg_node_embs:
-                # After trimming, pos_node_embs should have exactly prefix_len nodes
-                assert pos_node_embs.size(0) == prefix_len, f"Positive node embeddings should have length {prefix_len}, got {pos_node_embs.size(0)}"
-                
-                # Each negative path should also have prefix_len nodes
+                # After trimming, pos_node_embs should have exactly prefix_len + 1 nodes
+                assert pos_node_embs.size(0) == prefix_len + 1, f"Positive node embeddings should have length {prefix_len + 1}, got {pos_node_embs.size(0)}"
+
+                # Each negative path should also have prefix_len + 1 nodes
                 for neg_emb in neg_node_embs:
-                    assert neg_emb.size(0) == prefix_len, f"Negative node embeddings should have length {prefix_len}, got {neg_emb.size(0)}"
+                    assert neg_emb.size(0) == prefix_len + 1, f"Negative node embeddings should have length {prefix_len + 1}, got {neg_emb.size(0)}"
             
             if pos_edge_embs is not None and neg_edge_embs:
-                # After trimming, pos_edge_embs should have exactly prefix_len-1 edges
-                assert pos_edge_embs.size(0) == prefix_len-1, f"Positive edge embeddings should have length {prefix_len-1}, got {pos_edge_embs.size(0)}"
-                
-                # Each negative path should also have prefix_len-1 edges
+                # After trimming, pos_edge_embs should have exactly prefix_len edges
+                assert pos_edge_embs.size(0) == prefix_len, f"Positive edge embeddings should have length {prefix_len}, got {pos_edge_embs.size(0)}"
+
+                # Each negative path should also have prefix_len edges
                 for neg_emb in neg_edge_embs:
                     if neg_emb.size(0) > 0:  # Only check if there are edge embeddings
-                        assert neg_emb.size(0) == prefix_len-1, f"Negative edge embeddings should have length {prefix_len-1}, got {neg_emb.size(0)}"
+                        assert neg_emb.size(0) == prefix_len, f"Negative edge embeddings should have length {prefix_len}, got {neg_emb.size(0)}"
             
             # Combine positive and negative embeddings for this sample
             sample_node_embs = [pos_node_embs] + neg_node_embs
