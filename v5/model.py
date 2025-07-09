@@ -321,7 +321,8 @@ class PathPredictor(LightningModule):
         decay_rate = self.hparams.loss_decay
         for i, prefix_len in enumerate(prefix_lengths):
             # Higher weights for longer prefixes
-            weights[:, i] = torch.exp(-decay_rate * (prefix_lengths[-1] - prefix_len))
+            weights[:, i] = torch.exp(
+                torch.tensor(-decay_rate * (prefix_lengths[-1] - prefix_len), device=self.device))
         
         # Apply scaling if configured (MOVED HERE - before label adjustment)
         if self.scale_loss:
@@ -431,7 +432,7 @@ class PathPredictor(LightningModule):
 
         decay_rate = self.hparams.loss_decay
         for i, prefix_len in enumerate(prefix_lengths):
-            weights[:, i] = torch.exp(-decay_rate * (prefix_lengths[-1] - prefix_len))
+            weights[:, i] = torch.exp(torch.tensor(-decay_rate * (prefix_lengths[-1] - prefix_len), device=self.device))
         
         scaled_z_scores = torch.asinh(z_scores) if self.scale_loss else z_scores
         
