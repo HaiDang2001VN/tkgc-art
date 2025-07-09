@@ -195,8 +195,8 @@ class PathPredictor(LightningModule):
                 continue
             
             # Use tensor operations for embeddings
-            type_embeddings = torch.stack(type_embeddings, dim=0)
-            edge_embeddings = torch.cat([type_embeddings, edge_embeddings], dim=1)
+            type_embeddings = torch.stack(type_embeddings, dim=0) # (N, D)
+            edge_embeddings = torch.cat([type_embeddings.unsqueeze(1), edge_embeddings], dim=1)
             
             # Create interleaved edge-node embeddings
             batch_size, length, emb_dim = node_embeddings.size()
