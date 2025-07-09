@@ -1,0 +1,6 @@
+--extra-index-url https://data.pyg.org/whl/torch-2.4.0+cu124.html
+torch-geometric
+torch-scatter
+torch-sparse
+torch-cluster
+torch-spline-conv
