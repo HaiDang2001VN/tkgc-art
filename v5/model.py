@@ -112,7 +112,7 @@ class PathPredictor(LightningModule):
 
     def forward(self, src_emb: torch.Tensor, use_causal_mask: bool = True) -> torch.Tensor:
         h = self.input_proj(src_emb)
-        h = self.pos_encoder(h)
+        h = self.pos_encoder(h).contiguous()
         
         # Generate causal mask for the sequence length only if requested
         if use_causal_mask:
@@ -630,6 +630,7 @@ class PathPredictor(LightningModule):
 def main():
     # Set start method to 'spawn' before any other multiprocessing code runs
     mp.set_start_method('spawn', force=True)
+    torch.set_float32_matmul_precision('high')
     
     parser = argparse.ArgumentParser(
         description="Path prediction with Transformer encoder")
