@@ -124,7 +124,12 @@ class PathPredictor(LightningModule):
             h = self.transformer(h, mask=causal_mask)
         else:
             # No mask for non-causal prediction
-            h = self.transformer(h)
+            try:
+                h = self.transformer(h)
+            except Exception as e:
+                print(f"Error in transformer forward pass: {e}")
+                print(f"Input shape: {h.shape}")
+                raise e
             
         pred_emb = self.output_proj(h)
         return pred_emb
