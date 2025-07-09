@@ -111,7 +111,7 @@ class PathPredictor(LightningModule):
         self.test_step_outputs = []
 
     def forward(self, src_emb: torch.Tensor, use_causal_mask: bool = True) -> torch.Tensor:
-        h = self.input_proj(src_emb)
+        h = self.input_proj(src_emb.contiguous()).contiguous()
         h = self.pos_encoder(h).contiguous()
         
         # Generate causal mask for the sequence length only if requested
@@ -121,11 +121,11 @@ class PathPredictor(LightningModule):
                 seq_len, device=h.device
             )
             # Pass the mask to the transformer
-            h = self.transformer(h, mask=causal_mask)
+            h = self.transformer(h, mask=causal_mask).contiguous()
         else:
             # No mask for non-causal prediction
             try:
-                h = self.transformer(h)
+                h = self.transformer(h).contiguous()
             except Exception as e:
                 print(f"Error in transformer forward pass: {e}")
                 print(f"Input shape: {h.shape}")
