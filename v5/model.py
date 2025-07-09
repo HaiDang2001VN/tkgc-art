@@ -354,7 +354,7 @@ class PathPredictor(LightningModule):
             return torch.tensor(0.0, device=self.device), []
 
         # --- Loss calculation similar to training_step ---
-        prefix_lengths = sorted([int(k) for k in outputs.keys() if k.isdigit()])
+        prefix_lengths = sorted(list(outputs.keys()))
         if not prefix_lengths:
             return torch.tensor(0.0, device=self.device), []
 
