@@ -112,7 +112,12 @@ class PathPredictor(LightningModule):
 
     def forward(self, src_emb: torch.Tensor, use_causal_mask: bool = True) -> torch.Tensor:
         h = self.input_proj(src_emb.contiguous()).contiguous()
-        h = self.pos_encoder(h).contiguous()
+        try:
+            h = self.pos_encoder(h).contiguous()
+        except Exception as e:
+            print(f"Error in positional encoding forward pass: {e}")
+            print(f"Input shape: {h.shape}")
+            raise e
         
         # Generate causal mask for the sequence length only if requested
         if use_causal_mask:
@@ -213,7 +218,12 @@ class PathPredictor(LightningModule):
             embeddings[:, 1::2, :] = node_embeddings
             
             # Prediction with gradient
-            pred_emb = self.forward(embeddings, use_causal_mask=False)
+            try:
+                pred_emb = self.forward(embeddings, use_causal_mask=False)
+            except Exception as e:
+                print(f"Error in forward pass: {e}")
+                print(f"Input shape: {embeddings.shape} at prefix len {prefix_len}")
+                raise e
             pred_scores = self.score_proj(pred_emb[:, 0, :])
             
             # Compute z-scores while preserving gradients
