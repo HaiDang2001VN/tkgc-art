@@ -223,8 +223,8 @@ class EdgeDataset(Dataset):
                     # and replace the last node with the candidate
                     if pos_nodes and len(pos_nodes) >= prefix_len:
                         neg_path = pos_nodes[:prefix_len] + [node_id]
-                        # Edge types: take first prefix_len-1 edge types from positive path
-                        neg_edge_types = pos_edge_types[:prefix_len-1] if pos_edge_types and len(pos_edge_types) >= prefix_len-1 else []
+                        # Edge types: take first prefix_len edge types from positive path
+                        neg_edge_types = pos_edge_types[:prefix_len] if pos_edge_types and len(pos_edge_types) >= prefix_len else []
                         # Timestamps: take first prefix_len-1 edge timestamps from positive path, then add the new timestamp
                         neg_path_timestamps = (pos_edge_timestamps[:prefix_len-1] + [timestamp]) if pos_edge_timestamps and len(pos_edge_timestamps) >= prefix_len-1 else [timestamp]
                         
