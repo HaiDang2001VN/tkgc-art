@@ -248,7 +248,7 @@ class PathPredictor(LightningModule):
             return None
             
         # Get all prefix lengths from the outputs
-        prefix_lengths = sorted([int(k) for k in outputs.keys() if k.isdigit()])
+        prefix_lengths = sorted(list(outputs.keys()))
         if not prefix_lengths:
             return None  # No valid prefix lengths
         
