@@ -575,11 +575,11 @@ int main(int argc, char *argv[])
             // log_stream << "[Info] " << getCurrentTimestamp() << " Found " << tree_negatives.size() 
             //            << " negative paths for edge ID " << eid << " (u=" << u_node << ", ts=" << ts_val << ")" << std::endl;
         }
-        else
-        {
-            // log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for any prefix length of edge ID " 
-            //           << eid << " (u=" << u_node << ", ts=" << ts_val << ")" << std::endl;
-        }
+        // else
+        // {
+        //     log_stream << "[Info] " << getCurrentTimestamp() << " No negative paths found for any prefix length of edge ID " 
+        //               << eid << " (u=" << u_node << ", ts=" << ts_val << ")" << std::endl;
+        // }
     }
 
     // 6. Save results to JSON with new tree-like structure
