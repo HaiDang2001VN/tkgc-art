@@ -17,13 +17,13 @@ def calculate_metrics(group):
             'rank': 0, 'mrr': 1, 'hits@1': 1, 'hits@3': 1, 'hits@10': 1
         })
 
-    # Lower path_length is better.
-    true_path_length = true_link['path_length'].min()
+    # Lower length is better.
+    true_path_length = true_link['length'].min()
 
-    # Rank is 1 + number of negative samples with a better (smaller) or equal path length.
+    # Rank is 1 + number of negative samples with a better (smaller) or equal length.
     # We use '<=' because if scores are tied, the true link does not get the best rank.
     rank = 1 + group[(group['label'] == 0) &
-                     (group['path_length'] < true_path_length)].shape[0]
+                     (group['length'] < true_path_length)].shape[0]
 
     mrr = 1.0 / rank
     hits_at_1 = 1.0 if rank <= 1 else 0.0
