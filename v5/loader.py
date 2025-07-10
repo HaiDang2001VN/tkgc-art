@@ -171,7 +171,8 @@ class EdgeDataset(Dataset):
         neg_paths: dict,
         features_map: Union[dict, None],
         kge_proxy: Union[KGEModelProxy, None],
-        num_neg: Union[int, None] = None
+        num_neg: Union[int, None] = None,
+        split: str = None
     ):
         self.df = df
         self.edge_ids = df.index.tolist()
@@ -180,10 +181,10 @@ class EdgeDataset(Dataset):
         self.features_map = features_map
         self.kge_proxy = kge_proxy
         self.num_neg = num_neg
+        self.split = split
 
     def __len__(self):
-        # return len(self.edge_ids)
-        return 100
+        return len(self.edge_ids) if self.split != 'train' else 100  # For testing purposes, limit to 100 items in train split
 
     def __getitem__(self, idx):
         eid = self.edge_ids[idx]
@@ -552,7 +553,8 @@ class PathDataModule(LightningDataModule):
     def _dataloader(self, split: str, shuffle: bool):
         ds = EdgeDataset(
             self.data[split], self.pos_paths[split], self.neg_paths[split],
-            self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg
+            self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg,
+            split=split
         )
         
         return DataLoader(
