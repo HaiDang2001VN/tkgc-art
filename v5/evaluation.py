@@ -1,116 +1,60 @@
 #!/usr/bin/env python
 # eval.py - Manual evaluation script for link prediction tasks with MRR and Hits@K
 
-import torch
 import numpy as np
+import pandas as pd
 
 
-def calculate_mrr_hits(pos_score, neg_scores, k_values=[1, 3, 10]):
+def calculate_metrics(group):
     """
-    Calculate Reciprocal Rank (RR) and Hits@K for a single positive sample against a list of negative samples.
-    Prioritizes by length first (shorter is better), then by score (higher is better).
-
-    Args:
-        pos_score (float or tuple): The score of the positive sample, either a single value or (score, length) tuple.
-        neg_scores (list): A list of scores for negative samples, either single values or (score, length) tuples.
-        k_values (list): A list of integers for K in Hits@K.
-
-    Returns:
-        dict: A dictionary containing the Reciprocal Rank ('rr') and Hits@K values for the given sample.
+    Calculates MRR and Hits@K for a group of predictions for a single query.
+    The group contains one 'true_link' and multiple 'false_link' rows.
+    A lower 'path_length' is considered a better score.
     """
-    # Check if the scores are in tuple format (score, length)
-    is_tuple_format = isinstance(pos_score, tuple) and (not neg_scores or isinstance(neg_scores[0], tuple))
-    
-    if is_tuple_format:
-        pos_score_value, pos_length = pos_score
-        
-        # If there are no negative scores, the rank is 1 (the best possible)
-        if not neg_scores:
-            rank = 1
-        else:
-            # Count how many negative samples are "better" than the positive sample
-            # "Better" means: 1) shorter length or 2) same length but higher score
-            rank = 1 + sum(1 for s in neg_scores if s[1] < pos_length or (s[1] == pos_length and s[0] > pos_score_value))
-    else:
-        # Scalar case (pos_score is a single float)
-        if not neg_scores:
-            rank = 1
-        else:
-            rank = 1 + sum(1 for s in neg_scores if s > pos_score)
+    true_link = group[group['label'] == 'true_link']
+    if true_link.empty:
+        return pd.Series({
+            'rank': 0, 'mrr': 1, 'hits@1': 1, 'hits@3': 1, 'hits@10': 1
+        })
 
-    # Calculate Reciprocal Rank
-    rr = 1.0 / rank
+    # Lower path_length is better.
+    true_path_length = true_link['path_length'].min()
 
-    # Calculate Hits@K
-    hits_at_k = {f'hits@{k}': 1.0 if rank <= k else 0.0 for k in k_values}
+    # Rank is 1 + number of negative samples with a better (smaller) or equal path length.
+    # We use '<=' because if scores are tied, the true link does not get the best rank.
+    rank = 1 + group[(group['label'] == 'false_link') &
+                     (group['path_length'] < true_path_length)].shape[0]
 
-    return {'rr': rr, **hits_at_k}
+    mrr = 1.0 / rank
+    hits_at_1 = 1.0 if rank <= 1 else 0.0
+    hits_at_3 = 1.0 if rank <= 3 else 0.0
+    hits_at_10 = 1.0 if rank <= 10 else 0.0
+
+    return pd.Series({
+        'rank': rank,
+        'mrr': mrr,
+        'hits@1': hits_at_1,
+        'hits@3': hits_at_3,
+        'hits@10': hits_at_10
+    })
 
 
-def evaluate(edge_groups, verbose=True, k_values=[1, 3, 10]):
-    """
-    Evaluate link prediction performance from grouped scores.
+def evaluate(all_items, verbose=True, k_values=[1, 3, 10]):
+    df = pd.DataFrame(all_items).groupby(['u', "v_pos", "edge_type", "ts"])
+    metrics_df = df.apply(calculate_metrics, include_groups=False).reset_index()
 
-    Args:
-        edge_groups (dict): A dictionary where keys are edge identifiers and values are dicts
-                            with 'pos_score' and 'neg_scores'.
-        verbose (bool, optional): Whether to print information. Defaults to True.
-        k_values (list): A list of K values for Hits@K calculation.
+    # Calculate overall metrics
+    metrics = ['mrr'] + [f'hits@{k}' for k in k_values]
+    overall_metrics = metrics_df[metrics].mean()
 
-    Returns:
-        dict: A dictionary with the final evaluation metrics (MRR, Hits@K).
-              Groups without a positive score but with negative scores get zero metrics.
-              Groups with a positive score but no negative scores get a perfect score.
-              Groups with neither positive nor negative scores are ignored.
-    """
-    results = {
-        'rr': 0.0,
-        **{f'hits@{k}': 0.0 for k in k_values}
+    if verbose:
+        print("Evaluation Results:")
+        print(overall_metrics)
+
+    return {
+        k: v for k, v in overall_metrics.items()
+        if k.startswith('hits@') or k == 'mrr'
     }
-    num_evaluated = 0
-
-    for edge, scores in edge_groups.items():
-        pos_score = scores.get('pos_score')
-        neg_scores = scores.get('neg_scores', [])
-
-        if pos_score is None:
-            if not neg_scores:
-                # Skip this edge group if there is no positive score and no negative scores
-                if verbose:
-                    print(f"Skipping edge {edge} - no positive score and no negative scores")
-                continue
-            else:
-                # Count as failed prediction if there are negative scores but no positive score
-                if verbose:
-                    print(f"Edge {edge} has no positive score but has negative scores - counting as failed prediction")
-                num_evaluated += 1
-                # All metrics remain 0 for this edge
-                continue
-
-        if verbose:
-            print(f"Evaluating edge {edge}: pos_score = {pos_score}, neg_scores = {neg_scores}")
-
-        num_evaluated += 1
-
-        # Calculate metrics for this edge group
-        metrics = calculate_mrr_hits(pos_score, neg_scores, k_values=k_values)
-
-        # Aggregate metrics
-        results['rr'] += metrics['rr']
-        for k in k_values:
-            results[f'hits@{k}'] += metrics[f'hits@{k}']
-
-    # Average the results over the number of evaluated edges
-    if num_evaluated > 0:
-        results['rr'] /= num_evaluated
-        for k in k_values:
-            results[f'hits@{k}'] /= num_evaluated
-    else:
-        if verbose:
-            print("No edges were evaluated (all skipped).")
-
-    return results
-
 
 if __name__ == "__main__":
     # This section only runs when the script is executed directly

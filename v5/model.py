@@ -574,21 +574,22 @@ class PathPredictor(LightningModule):
         # avg_adjustment = sum([(1 - ((length - min_len) / (max_hops - min_len + 1))) * max_adjust for length in lengths]) / len(lengths) if lengths else 0
         # self.log(f'{stage}_avg_length_adjustment', avg_adjustment, on_step=False, on_epoch=True)
 
-        # --- Group scores by edge for evaluation (now with adjusted scores) ---
-        edge_groups = defaultdict(lambda: {'pos_score': None, 'neg_scores': []})
-        for item in all_items:
-            # Use v_pos as the target node for grouping, which is the true target for all edges
-            v_for_grouping = item.get('v_pos', item['v'])
-            key = (item['u'], item.get('edge_type'), v_for_grouping, item['ts'])
-            score = item['score']  # Now using the adjusted score
-            length = item['length']
+        # # --- Group scores by edge for evaluation (now with adjusted scores) ---
+        # edge_groups = defaultdict(lambda: {'pos_score': None, 'neg_scores': []})
+        # for item in all_items:
+        #     # Use v_pos as the target node for grouping, which is the true target for all edges
+        #     v_for_grouping = item.get('v_pos', item['v'])
+        #     key = (item['u'], item.get('edge_type'), v_for_grouping, item['ts'])
+        #     score = item['score']  # Now using the adjusted score
+        #     length = item['length']
             
-            if item['label'] == 1:
-                edge_groups[key]['pos_score'] = (score, length)
-            else:
-                edge_groups[key]['neg_scores'].append((score, length))
+        #     if item['label'] == 1:
+        #         edge_groups[key]['pos_score'] = (score, length)
+        #     else:
+        #         edge_groups[key]['neg_scores'].append((score, length))
 
-        results = evaluate(edge_groups, verbose=False)
+        # results = evaluate(edge_groups, verbose=False)
+        results = evaluate(all_items, verbose=False)
         for k, v in results.items():
             self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
         print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
