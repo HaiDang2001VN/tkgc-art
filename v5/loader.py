@@ -49,6 +49,7 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
                 # No positive path found, record it without adding to embs
                 meta_data.append({
                     'num_paths': 0,
+                    'pos_path_length': 0,  # No positive path length
                     'label': item.get('label', None),
                     'u': item.get('u', None),
                     'v': item.get('v', None),
@@ -134,7 +135,15 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
         # we can stack directly without checking or padding
         if all_node_embs:
             # All node embeddings should have the same shape: [prefix_len, embedding_dim]
-            node_embeddings = torch.stack(all_node_embs)
+            try:
+                node_embeddings = torch.stack(all_node_embs)
+            except RuntimeError as e:
+                print(f"Error stacking node embeddings for prefix length {prefix_len}: {e}")
+                # Print the shape of embeddings and metadata
+                for i, emb in enumerate(all_node_embs):
+                    print(f"Node embedding {i} shape: {emb.shape}")
+                print(f"Metadata for prefix length {prefix_len}: {meta_data}")
+                raise e
         else:
             node_embeddings = torch.tensor([])
         
