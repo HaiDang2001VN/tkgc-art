@@ -589,7 +589,7 @@ class PathPredictor(LightningModule):
         #         edge_groups[key]['neg_scores'].append((score, length))
 
         # results = evaluate(edge_groups, verbose=False)
-        results = evaluate(all_items, verbose=False)
+        results, metrics_df = evaluate(all_items, verbose=False)
         for k, v in results.items():
             self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
         print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
