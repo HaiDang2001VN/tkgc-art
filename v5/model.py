@@ -172,6 +172,9 @@ class PathPredictor(LightningModule):
                 ts = sample_meta.get('ts', -1).item() if hasattr(sample_meta.get('ts', -1), 'item') else sample_meta.get('ts', -1)
                 sample_key = (u, v, ts)
                 
+                if 'v_pos' not in sample_meta:
+                    raise ValueError("Metadata must include 'v_pos' for new prediction format.")
+                
                 if sample_key not in seen_samples:
                     seen_samples.add(sample_key)
                     all_samples.append(sample_meta)  # Store the full metadata for this sample
@@ -196,7 +199,7 @@ class PathPredictor(LightningModule):
             
             for sample_meta in meta_data:
                 type_embedding = sample_meta.get('type_embedding', None)
-                num_paths.append(sample_meta.get('num_paths', 1))
+                num_paths.append(sample_meta.get('num_paths', 0))
                 if type_embedding is not None:
                     type_embeddings.extend([type_embedding] * num_paths[-1])
 
@@ -231,17 +234,25 @@ class PathPredictor(LightningModule):
             z_scores_list = []
             
             for num_path in num_paths:
-                # Get the current sample's prefix scores
-                scores = pred_scores[cur_idx:cur_idx + num_path]
+                z = None
+                
+                if num_path == 0:
+                    z = 0
+                elif num_path == 1:
+                    z = pred_scores[cur_idx]
+                else:
+                    # Get the current sample's prefix scores
+                    scores = pred_scores[cur_idx:cur_idx + num_path]
+                    
+                    # Calculate mean and std while preserving gradients
+                    mean = scores.mean(0)
+                    # Use unbiased=False to match previous behavior
+                    std = scores.std(0, unbiased=False)
+                    
+                    # Calculate z-score for first score (positive sample)
+                    z = (scores[0] - mean)/(std + 1e-8)
+                
                 cur_idx += num_path
-                
-                # Calculate mean and std while preserving gradients
-                mean = scores.mean(0)
-                # Use unbiased=False to match previous behavior
-                std = scores.std(0, unbiased=False)
-                
-                # Calculate z-score for first score (positive sample)
-                z = (scores[0] - mean)/(std + 1e-8)
                 z_scores_list.append(z)
             
             # Stack z_scores into single torch tensor - maintains gradients
@@ -327,10 +338,11 @@ class PathPredictor(LightningModule):
                 sample_key = (u, v, ts)
                 
                 sample_idx = sample_to_idx.get(sample_key, -1)
+                num_path = meta.get('num_paths', 0)
                 if sample_idx >= 0:
                     # Directly assign the score tensor to preserve gradients
                     z_scores[sample_idx, i] = score
-                    mask[sample_idx, i] = 1.0
+                    mask[sample_idx, i] = 1.0 if num_path > 0 else 0.0
 
         # Calculate weights with exponential decay
         decay_rate = self.hparams.loss_decay
@@ -429,13 +441,15 @@ class PathPredictor(LightningModule):
                 v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
                 ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
                 v_pos = meta.get('v_pos', v).item() if hasattr(meta.get('v_pos', v), 'item') else meta.get('v_pos', v)
+                
                 sample_key = (u, v, ts, v_pos)  # Include v_pos in the key
                 sample_idx = sample_to_idx.get(sample_key, -1)
+                num_path = meta.get('num_paths', 0)
 
                 if sample_idx >= 0:
                     # Fill z_scores and mask
                     z_scores[sample_idx, i] = z_score
-                    mask[sample_idx, i] = 1.0
+                    mask[sample_idx, i] = 1.0 if num_path > 0 else 0.0
 
                     # Since prefix_lengths are sorted, this update will be for the longest prefix.
                     # The positive sample's score is at the current cursor position.
@@ -443,7 +457,7 @@ class PathPredictor(LightningModule):
                     length_for_longest_prefix[sample_idx] = prefix_len
                 
                 # Move cursor to the start of the next sample's scores in the flat tensor
-                raw_score_cursor += meta.get('num_paths', 1)
+                raw_score_cursor += num_path
 
         decay_rate = self.hparams.loss_decay
         for i, prefix_len in enumerate(prefix_lengths):

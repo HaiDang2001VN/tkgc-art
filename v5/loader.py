@@ -38,26 +38,40 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
     result = {}
     
     for prefix_len in all_prefix_lengths:
-        valid_samples = []
-        
-        # First pass: identify valid samples for this prefix length
-        for item in batch:
-            if ('negs_by_prefix_length' in item and 
-                prefix_len in item['negs_by_prefix_length'] and 
-                item['negs_by_prefix_length'][prefix_len] and
-                'pos_node_embs' in item and item['pos_node_embs'] is not None):
-                valid_samples.append(item)
-        
-        if not valid_samples:
-            continue
-            
         # Lists to collect all embeddings for this prefix length
         all_node_embs = []
         all_edge_embs = []
         meta_data = []
         
         # Process each sample
-        for item in valid_samples:
+        for item in batch:
+            if 'pos_node_embs' not in item or 'pos_edge_embs' not in item:
+                # No positive path found, record it without adding to embs
+                meta_data.append({
+                    'num_paths': 0,
+                    'label': item.get('label', None),
+                    'u': item.get('u', None),
+                    'v': item.get('v', None),
+                    'ts': item.get('ts', None),
+                    'edge_type': item.get('edge_type', None),
+                    'type_embedding': item.get('type_embedding', None),
+                    'v_pos': item.get('v_pos', None)
+                })
+                continue
+            
+            # if 'neg_node_embs_by_prefix' not in item or 'neg_edge_embs_by_prefix' not in item:
+            #     # No negative path found, record it without adding to embs
+            #     meta_data.append({
+            #         'num_paths': 0,
+            #         'label': item.get('label', None),
+            #         'u': item.get('u', None),
+            #         'v': item.get('v', None),
+            #         'ts': item.get('ts', None),
+            #         'edge_type': item.get('edge_type', None),
+            #         'type_embedding': item.get('type_embedding', None),
+            #         'v_pos': item.get('v_pos', None)
+            #     })
+            
             # Get positive path embeddings and trim them to match the prefix length
             pos_node_embs = item['pos_node_embs']
             pos_edge_embs = item['pos_edge_embs'] if 'pos_edge_embs' in item else None
@@ -109,7 +123,7 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             }
             
             # Add edge information to metadata
-            for key in ['label', 'u', 'v', 'ts', 'edge_type', 'type_embedding']:
+            for key in ['label', 'u', 'v', 'ts', 'edge_type', 'type_embedding', 'v_pos']:
                 if key in item:
                     meta[key] = item[key]
                     
