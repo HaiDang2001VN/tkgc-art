@@ -11,7 +11,7 @@ def calculate_metrics(group):
     The group contains one 'true_link' and multiple 'false_link' rows.
     A lower 'path_length' is considered a better score.
     """
-    true_link = group[group['label'] == 'true_link']
+    true_link = group[group['label'] == 1]
     if true_link.empty:
         return pd.Series({
             'rank': 0, 'mrr': 1, 'hits@1': 1, 'hits@3': 1, 'hits@10': 1
@@ -22,7 +22,7 @@ def calculate_metrics(group):
 
     # Rank is 1 + number of negative samples with a better (smaller) or equal path length.
     # We use '<=' because if scores are tied, the true link does not get the best rank.
-    rank = 1 + group[(group['label'] == 'false_link') &
+    rank = 1 + group[(group['label'] == 0) &
                      (group['path_length'] < true_path_length)].shape[0]
 
     mrr = 1.0 / rank
