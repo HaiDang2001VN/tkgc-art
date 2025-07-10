@@ -215,7 +215,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
 
         # For true edges (label=1), set v_pos to be same as v_raw if not provided
         if label == 1 and v_pos is None:
-            v_pos = v_raw
+            v_pos = v
 
         record = {
             "feat_pos_u": u_raw,
