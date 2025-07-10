@@ -594,19 +594,10 @@ class PathPredictor(LightningModule):
                 pos_scores_list.append(group['pos_score'])
                 neg_scores_list.append(group['neg_scores'])
 
-        if pos_scores_list:
-            max_neg_len = max(len(negs) for negs in neg_scores_list)
-            neg_scores_padded = [negs + [0.0] * (max_neg_len - len(negs)) for negs in neg_scores_list]
-            
-            pos_scores = torch.tensor(pos_scores_list, device=self.device)
-            neg_scores = torch.tensor(neg_scores_padded, device=self.device)
-
-            results = evaluate(pos_scores, neg_scores, verbose=False)
-            for k, v in results.items():
-                self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
-            print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
-        else:
-            print(f"Warning: No positive samples with corresponding negative samples found in {stage}. Skipping metric evaluation.")
+        results = evaluate(edge_groups, verbose=False)
+        for k, v in results.items():
+            self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
+        print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
 
         # --- Export raw results to JSON ---
         try:

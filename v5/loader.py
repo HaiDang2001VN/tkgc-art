@@ -45,50 +45,29 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
         
         # Process each sample
         for item in batch:
-            if prefix_len not in item['negs_by_prefix_length']:
-                # No negative paths for this prefix length, skip this item
+            if 'pos_node_embs' not in item:
                 continue
-            
-            if 'pos_node_embs' not in item or 'pos_edge_embs' not in item:
-                # No positive path found, record it without adding to embs
-                meta_data.append({
-                    'num_paths': 0,
-                    'pos_path_length': 0,  # No positive path length
-                    'label': item.get('label', None),
-                    'u': item.get('u', None),
-                    'v': item.get('v', None),
-                    'ts': item.get('ts', None),
-                    'edge_type': item.get('edge_type', None),
-                    'type_embedding': item.get('type_embedding', None),
-                    'v_pos': item.get('v_pos', None)
-                })
-                continue
-            
-            # if 'neg_node_embs_by_prefix' not in item or 'neg_edge_embs_by_prefix' not in item:
-            #     # No negative path found, record it without adding to embs
-            #     meta_data.append({
-            #         'num_paths': 0,
-            #         'label': item.get('label', None),
-            #         'u': item.get('u', None),
-            #         'v': item.get('v', None),
-            #         'ts': item.get('ts', None),
-            #         'edge_type': item.get('edge_type', None),
-            #         'type_embedding': item.get('type_embedding', None),
-            #         'v_pos': item.get('v_pos', None)
-            #     })
             
             # Get positive path embeddings and trim them to match the prefix length
             pos_node_embs = item['pos_node_embs']
             pos_edge_embs = item['pos_edge_embs'] if 'pos_edge_embs' in item else None
             
             # Trim positive embeddings to match the prefix length for fair comparison
-            if pos_node_embs is not None and pos_node_embs.size(0) > (prefix_len + 1):
-                # Keep only the prefix part of the positive path
-                pos_node_embs = pos_node_embs[:prefix_len + 1]
+            if pos_node_embs is not None:
+                if pos_node_embs.size(0) > (prefix_len + 1):
+                    # Keep only the prefix part of the positive path
+                    pos_node_embs = pos_node_embs[:prefix_len + 1]
+                elif pos_node_embs.size(0) < (prefix_len + 1):
+                    # If positive path shorter meaning no negative paths, we can skip this sample
+                    continue
 
-            if pos_edge_embs is not None and pos_edge_embs.size(0) > prefix_len:
-                # For edges, we need prefix_len edges to connect prefix_len + 1 nodes
-                pos_edge_embs = pos_edge_embs[:prefix_len]
+            if pos_edge_embs is not None:
+                if pos_edge_embs.size(0) > prefix_len:
+                    # For edges, we need prefix_len edges to connect prefix_len + 1 nodes
+                    pos_edge_embs = pos_edge_embs[:prefix_len]
+                elif pos_edge_embs.size(0) < prefix_len:
+                    # If positive path edges shorter meaning no negative paths, we can skip this sample
+                    continue
 
             # Get negative path embeddings for this prefix length
             neg_node_embs = item['neg_node_embs_by_prefix'].get(prefix_len, [])
