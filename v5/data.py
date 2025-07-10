@@ -178,7 +178,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
 
     # read entity universe size (for negative sampling) ----------------------------------
     n_ent, n_rel, _ = map(int, (root_dir / "stat.txt").read_text().split())
-    all_entities = np.arange(n_ent, dtype=np.int64)
+    # all_entities will be defined later based on mapped nodes
 
     # configuration knobs ----------------------------------------------------------------
     train_ratio = float(configuration.get(
@@ -197,10 +197,10 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     # mapping dicts ----------------------------------------------------------------------
     node_map: Dict[int, int] = {}  # unified mapping for both u and v
     edge_type_map: Dict[int, int] = {}
-    neighbor_dict: Dict[int, set] = {}  # node -> set of all neighbors across all time
+    neighbor_dict: Dict[int, set] = {}  # node -> set of all neighbors across all time (uses TRANSFORMED IDs)
     
     records = []
-    original_edges = []  # To store original edges for later creating inverse edges
+    original_edges = []  # To store original edges for later creating inverse edges (uses TRANSFORMED IDs)
 
     def _id_assign(mapping: Dict[int, int], raw_id: int) -> int:
         if raw_id not in mapping:
@@ -208,14 +208,17 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
         return mapping[raw_id]
 
     # helper to append an edge record ----------------------------------------------------
-    def _append(u_raw: int, v_raw: int, r_raw: int, ts_val: int, split: str, label: int, v_pos=None, store_for_inverse=True):
+    def _append(u_raw: int, v_raw: int, r_raw: int, ts_val: int, split: str, label: int, v_pos_raw=None, store_for_inverse=True):
         u = _id_assign(node_map, u_raw)
         v = _id_assign(node_map, v_raw)
         e = _id_assign(edge_type_map, r_raw)
 
         # For true edges (label=1), set v_pos to be same as v_raw if not provided
-        if label == 1 and v_pos is None:
-            v_pos = v
+        if label == 1 and v_pos_raw is None:
+            v_pos_raw = v_raw
+        
+        # Map v_pos_raw to its transformed ID if it exists
+        v_pos = _id_assign(node_map, v_pos_raw) if v_pos_raw is not None else None
 
         record = {
             "feat_pos_u": u_raw,
@@ -233,18 +236,18 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
         
         records.append(record)
         
-        # Store original edges for later creating inverse edges
+        # Store original edges for later creating inverse edges (using transformed IDs)
         if store_for_inverse and label == 1 and add_inverse_edges:
-            original_edges.append((u_raw, v_raw, r_raw, ts_val, split, label, v_pos))
+            original_edges.append((u, v, e, ts_val, split, label, v_pos))
         
-        # Update neighbor dictionary for positive edges only
+        # Update neighbor dictionary for positive edges only (using transformed IDs)
         if label == 1:
-            if u_raw not in neighbor_dict:
-                neighbor_dict[u_raw] = set()
-            if v_raw not in neighbor_dict:
-                neighbor_dict[v_raw] = set()
-            neighbor_dict[u_raw].add(v_raw)
-            neighbor_dict[v_raw].add(u_raw)  # undirected graph assumption
+            if u not in neighbor_dict:
+                neighbor_dict[u] = set()
+            if v not in neighbor_dict:
+                neighbor_dict[v] = set()
+            neighbor_dict[u].add(v)
+            neighbor_dict[v].add(u)  # undirected graph assumption
 
     # ----------------------------------------------------------------------
     # iterate over splits - first pass: collect all positive edges
@@ -272,25 +275,39 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             split_label = (
                 "pre" if split == "train" and threshold is not None and row.ts < threshold else split
             )
+            # Pass raw IDs to _append, which handles mapping and storing transformed IDs
             _append(row.head, row.tail, row.rel, int(row.ts), split_label, 1)
             
             # Store all positive edges in their respective split list for potential negative sampling
-            positive_edges_by_split[split_label].append((row.head, row.tail, row.rel, int(row.ts), split_label))
+            # We need to get the transformed IDs for this
+            u = node_map[row.head]
+            v = node_map[row.tail]
+            e = edge_type_map[row.rel]
+            positive_edges_by_split[split_label].append((u, v, e, int(row.ts), split_label))
 
     print(f"Collected neighbor information from {len(neighbor_dict)} nodes")
+    
+    # Create reverse maps for creating inverse/negative edges from transformed IDs
+    node_map_inv = {v: k for k, v in node_map.items()}
+    edge_type_map_inv = {v: k for k, v in edge_type_map.items()}
     
     # ----------------------------------------------------------------------
     # Generate inverse edges for all original positive edges
     # ----------------------------------------------------------------------
     if add_inverse_edges:
         print(f"Adding inverse edges for {len(original_edges)} original edges...")
-        num_original_rel_types = len(edge_type_map)
         
         # Create inverse edges by swapping u and v, and adding offset to relation type
-        for u_raw, v_raw, r_raw, ts_val, split, label, v_pos in tqdm(original_edges, desc="Creating inverse edges"):
+        for u, v, e, ts_val, split, label, v_pos in tqdm(original_edges, desc="Creating inverse edges"):
+            # Get raw IDs back from transformed IDs
+            u_raw = node_map_inv[u]
+            v_raw = node_map_inv[v]
+            r_raw = edge_type_map_inv[e]
+            
             # Use r_raw + n_rel as the inverse relation ID
             inverse_r_raw = r_raw + n_rel
             # When creating inverse edge, we don't want to store it for creating inverses again
+            # The v_pos for an inverse edge u<-v should be u, so we pass u_raw
             _append(v_raw, u_raw, inverse_r_raw, ts_val, split, label, u_raw, store_for_inverse=False)
         
         print(f"Added {len(original_edges)} inverse edges. Total relations: {len(edge_type_map)}")
@@ -300,6 +317,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     # ----------------------------------------------------------------------
     if neg_per_pos > 0:
         seed = 42  # Global random seed
+        all_entities = np.arange(len(node_map), dtype=np.int64) # Use mapped entities
         
         for split in ("train", "valid", "test"):
             print(f"Generating negatives for {split} split using {num_workers} workers...")
@@ -308,7 +326,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             if not pos_edges:
                 continue
             
-            # Prepare arguments for multiprocessing
+            # Prepare arguments for multiprocessing (uses transformed IDs)
             mp_args = [(head, tail, rel, ts, split_name, neighbor_dict.get(head, set()),
                         all_entities, neg_per_pos, seed) for head, tail, rel, ts, split_name in pos_edges]
             
@@ -323,7 +341,12 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             # Process negative results
             for neg_edges in neg_results:
                 for head, v_neg, rel, ts, split_name, v_pos in neg_edges:
-                    _append(head, v_neg, rel, ts, split_name, 0, v_pos, store_for_inverse=False)
+                    # Get raw IDs back to call _append
+                    head_raw = node_map_inv[head]
+                    v_neg_raw = node_map_inv[v_neg]
+                    rel_raw = edge_type_map_inv[rel]
+                    v_pos_raw = node_map_inv[v_pos]
+                    _append(head_raw, v_neg_raw, rel_raw, ts, split_name, 0, v_pos_raw, store_for_inverse=False)
 
     print(f"Loaded {len(records):,} total (pos+neg) edges")
     save_edges(configuration, node_map, edge_type_map)
