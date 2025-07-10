@@ -182,7 +182,8 @@ class EdgeDataset(Dataset):
         self.num_neg = num_neg
 
     def __len__(self):
-        return len(self.edge_ids)
+        # return len(self.edge_ids)
+        return 100
 
     def __getitem__(self, idx):
         eid = self.edge_ids[idx]
