@@ -228,7 +228,7 @@ int main(int argc, char **argv)
             while (!q_fwd.empty() && !q_bwd.empty() && !path_found)
             {
                 // Stop if the sum of depths of the two frontiers exceeds max_hops
-                if (depth_fwd[q_fwd.front()] + depth_bwd[q_bwd.front()] > max_hops) {
+                if (depth_fwd[q_fwd.front()] + depth_bwd[q_bwd.front()] >= max_hops) {
                     break;
                 }
 
