@@ -553,26 +553,26 @@ class PathPredictor(LightningModule):
             self.log(f'{stage}_loss', total_loss, prog_bar=True, on_step=False, on_epoch=True)
             print(f"[{stage.upper()}] Loss: {total_loss:.4f}")
 
-        # --- Apply length-based adjustments to all scores ---
-        max_hops = self.hparams.get('max_hops', 10)
-        max_adjust = self.hparams.get('max_adjust', 0.1)
+        # # --- Apply length-based adjustments to all scores ---
+        # max_hops = self.hparams.get('max_hops', 10)
+        # max_adjust = self.hparams.get('max_adjust', 0.1)
         
-        # Find the minimum path length across all items for normalization
-        lengths = [item.get('length', max_hops + 2) for item in all_items]
-        min_len = min(lengths) if lengths else 0
+        # # Find the minimum path length across all items for normalization
+        # lengths = [item.get('length', max_hops + 2) for item in all_items]
+        # min_len = min(lengths) if lengths else 0
         
-        # Calculate and apply length-based adjustments to all items
-        for item in all_items:
-            length = item.get('length', max_hops + 2)
-            # Calculate ratio: shorter paths get higher ratio values
-            ratio = 1 - ((length - min_len) / (max_hops - min_len + 1))
-            # Apply adjustment to score
-            adjustment = ratio * max_adjust
-            item['score'] += adjustment
+        # # Calculate and apply length-based adjustments to all items
+        # for item in all_items:
+        #     length = item.get('length', max_hops + 2)
+        #     # Calculate ratio: shorter paths get higher ratio values
+        #     ratio = 1 - ((length - min_len) / (max_hops - min_len + 1))
+        #     # Apply adjustment to score
+        #     adjustment = ratio * max_adjust
+        #     item['score'] += adjustment
             
-        # Log the average adjustment for monitoring
-        avg_adjustment = sum([(1 - ((length - min_len) / (max_hops - min_len + 1))) * max_adjust for length in lengths]) / len(lengths) if lengths else 0
-        self.log(f'{stage}_avg_length_adjustment', avg_adjustment, on_step=False, on_epoch=True)
+        # # Log the average adjustment for monitoring
+        # avg_adjustment = sum([(1 - ((length - min_len) / (max_hops - min_len + 1))) * max_adjust for length in lengths]) / len(lengths) if lengths else 0
+        # self.log(f'{stage}_avg_length_adjustment', avg_adjustment, on_step=False, on_epoch=True)
 
         # --- Group scores by edge for evaluation (now with adjusted scores) ---
         edge_groups = defaultdict(lambda: {'pos_score': None, 'neg_scores': []})
@@ -581,18 +581,12 @@ class PathPredictor(LightningModule):
             v_for_grouping = item.get('v_pos', item['v'])
             key = (item['u'], item.get('edge_type'), v_for_grouping, item['ts'])
             score = item['score']  # Now using the adjusted score
+            length = item['length']
             
             if item['label'] == 1:
-                edge_groups[key]['pos_score'] = score
+                edge_groups[key]['pos_score'] = (score, length)
             else:
-                edge_groups[key]['neg_scores'].append(score)
-
-        pos_scores_list = []
-        neg_scores_list = []
-        for group in edge_groups.values():
-            if group['pos_score'] is not None and group['neg_scores']:
-                pos_scores_list.append(group['pos_score'])
-                neg_scores_list.append(group['neg_scores'])
+                edge_groups[key]['neg_scores'].append((score, length))
 
         results = evaluate(edge_groups, verbose=False)
         for k, v in results.items():

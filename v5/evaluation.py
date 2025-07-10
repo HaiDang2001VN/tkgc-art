@@ -7,22 +7,36 @@ import numpy as np
 
 def calculate_mrr_hits(pos_score, neg_scores, k_values=[1, 3, 10]):
     """
-    Calculate Reciprocal Rank (RR) and Hits@K for a single positive score against a list of negative scores.
+    Calculate Reciprocal Rank (RR) and Hits@K for a single positive sample against a list of negative samples.
+    Prioritizes by length first (shorter is better), then by score (higher is better).
 
     Args:
-        pos_score (float): The score of the positive sample.
-        neg_scores (list of float): A list of scores for the negative samples.
+        pos_score (float or tuple): The score of the positive sample, either a single value or (score, length) tuple.
+        neg_scores (list): A list of scores for negative samples, either single values or (score, length) tuples.
         k_values (list): A list of integers for K in Hits@K.
 
     Returns:
         dict: A dictionary containing the Reciprocal Rank ('rr') and Hits@K values for the given sample.
     """
-    # If there are no negative scores, the rank is 1 (the best possible).
-    if not neg_scores:
-        rank = 1
+    # Check if the scores are in tuple format (score, length)
+    is_tuple_format = isinstance(pos_score, tuple) and (not neg_scores or isinstance(neg_scores[0], tuple))
+    
+    if is_tuple_format:
+        pos_score_value, pos_length = pos_score
+        
+        # If there are no negative scores, the rank is 1 (the best possible)
+        if not neg_scores:
+            rank = 1
+        else:
+            # Count how many negative samples are "better" than the positive sample
+            # "Better" means: 1) shorter length or 2) same length but higher score
+            rank = 1 + sum(1 for s in neg_scores if s[1] < pos_length or (s[1] == pos_length and s[0] > pos_score_value))
     else:
-        # The rank is 1 + the number of negative scores greater than the positive score.
-        rank = 1 + sum(1 for s in neg_scores if s > pos_score)
+        # Scalar case (pos_score is a single float)
+        if not neg_scores:
+            rank = 1
+        else:
+            rank = 1 + sum(1 for s in neg_scores if s > pos_score)
 
     # Calculate Reciprocal Rank
     rr = 1.0 / rank
