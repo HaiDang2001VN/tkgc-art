@@ -45,6 +45,10 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
         
         # Process each sample
         for item in batch:
+            if prefix_len not in item['negs_by_prefix_length']:
+                # No negative paths for this prefix length, skip this item
+                continue
+            
             if 'pos_node_embs' not in item or 'pos_edge_embs' not in item:
                 # No positive path found, record it without adding to embs
                 meta_data.append({
