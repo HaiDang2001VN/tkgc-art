@@ -475,7 +475,12 @@ class PathDataModule(LightningDataModule):
                 self.pos_paths[split] = pos_paths
                 neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{split}_neg.json")
                 
-                raw_neg_data = json.load(open(neg_fn))
+                try:
+                    raw_neg_data = json.load(open(neg_fn))
+                except FileNotFoundError:
+                    print(f"Negative paths file not found for {split} split: {neg_fn}. Skipping negative paths setup.")
+                    raw_neg_data = {}
+                
                 neg_paths = {}
                 for eid, data in raw_neg_data.items():
                     # Assume tree-like format (no format checking)
