@@ -111,7 +111,9 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             for key in ['label', 'u', 'v', 'ts', 'edge_type', 'type_embedding', 'v_pos']:
                 if key in item:
                     meta[key] = item[key]
-                    
+            
+            if length == 5:
+                print("Found max hops")
             meta_data.append(meta)
         
         # Stack all embeddings into a single tensor
@@ -212,6 +214,9 @@ class EdgeDataset(Dataset):
             item['length'] = len(pos_nodes)
         else:
             item['length'] = 0
+            
+        if length == 5:
+            print("Found max hops")
         
         if pos_nodes is None: # If no positive path, skip this item
             return item # Still returns the label in order for later evaluation if needed
