@@ -112,8 +112,6 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
                 if key in item:
                     meta[key] = item[key]
             
-            if length == 5:
-                print("Found max hops")
             meta_data.append(meta)
         
         # Stack all embeddings into a single tensor
@@ -210,14 +208,11 @@ class EdgeDataset(Dataset):
         if "hops" in pos_path_info:
             item['length'] = pos_path_info["hops"] + 1
             assert item['length'] == len(pos_nodes), "Length mismatch between hops and nodes in positive path"
-        elif len(pos_nodes) > 0:
+        elif pos_nodes is not None and len(pos_nodes) > 0:
             item['length'] = len(pos_nodes)
         else:
             item['length'] = 0
             
-        if item['length'] == 5:
-            print("Found max hops")
-        
         if pos_nodes is None: # If no positive path, skip this item
             return item # Still returns the label in order for later evaluation if needed
         

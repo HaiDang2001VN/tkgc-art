@@ -171,6 +171,9 @@ class PathPredictor(LightningModule):
                 v = sample_meta.get('v', -1).item() if hasattr(sample_meta.get('v', -1), 'item') else sample_meta.get('v', -1)
                 ts = sample_meta.get('ts', -1).item() if hasattr(sample_meta.get('ts', -1), 'item') else sample_meta.get('ts', -1)
                 sample_key = (u, v, ts)
+                length = sample_meta.get('length', 0).item() if hasattr(sample_meta.get('length', 0), 'item') else sample_meta.get('length', 0)
+                if length == 5:
+                    print("Found max hops")
                 
                 if 'v_pos' not in sample_meta:
                     raise ValueError("Metadata must include 'v_pos' for new prediction format.")
@@ -490,6 +493,9 @@ class PathPredictor(LightningModule):
                 v_pos = v_pos.item()
                 
             length = meta['length']
+            
+            if length == 5:
+                print("max hops at eval")
 
             item = {
                 'u': u,

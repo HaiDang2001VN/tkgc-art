@@ -47,6 +47,7 @@ def evaluate(all_items, verbose=True, k_values=[1, 3, 10]):
     metrics = ['rank', 'mrr'] + [f'hits@{k}' for k in k_values]
     overall_metrics = metrics_df[metrics].mean()
 
+    print(df['length'].describe())
     if verbose:
         print("Evaluation Results:")
         print(overall_metrics)
