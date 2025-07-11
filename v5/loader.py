@@ -51,13 +51,14 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             # Get positive path embeddings and trim them to match the prefix length
             pos_node_embs = item['pos_node_embs']
             pos_edge_embs = item['pos_edge_embs'] if 'pos_edge_embs' in item else None
+            length = item['length']
             
             # Trim positive embeddings to match the prefix length for fair comparison
             if pos_node_embs is not None:
-                if pos_node_embs.size(0) > (prefix_len + 1):
+                if length > (prefix_len + 1):
                     # Keep only the prefix part of the positive path
                     pos_node_embs = pos_node_embs[:prefix_len + 1]
-                elif pos_node_embs.size(0) < (prefix_len + 1):
+                elif length < (prefix_len + 1):
                     # If positive path shorter meaning no negative paths, we can skip this sample
                     continue
 
@@ -103,7 +104,7 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             # Since pos_node_embs is already trimmed, we can directly use its length
             meta = {
                 'num_paths': len(sample_node_embs),
-                'pos_path_length': pos_node_embs.size(0) if pos_node_embs is not None else 0
+                'length': length
             }
             
             # Add edge information to metadata
@@ -202,6 +203,15 @@ class EdgeDataset(Dataset):
             v_pos_val = self.df.at[eid, 'v_pos']
             if pd.notna(v_pos_val) and v_pos_val != "None":
                 item['v_pos'] = torch.tensor(int(v_pos_val), dtype=torch.long)
+                
+        # Item: length of pos path
+        if "hops" in pos_path_info:
+            item['length'] = pos_path_info["hops"] + 1
+            assert item['length'] == len(pos_nodes), "Length mismatch between hops and nodes in positive path"
+        elif len(pos_nodes) > 0:
+            item['length'] = len(pos_nodes)
+        else:
+            item['length'] = 0
         
         if pos_nodes is None: # If no positive path, skip this item
             return item # Still returns the label in order for later evaluation if needed

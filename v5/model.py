@@ -414,8 +414,7 @@ class PathPredictor(LightningModule):
         weights = torch.zeros(num_samples, num_prefix_lengths, device=self.device)
         
         # Tensors to store the final raw score and length for each sample's longest prefix
-        score_for_longest_prefix = torch.zeros(num_samples, device=self.device)
-        length_for_longest_prefix = torch.zeros(num_samples, dtype=torch.int, device=self.device)
+        seq_score = torch.zeros(num_samples, device=self.device)
         
         labels = []
         for meta in all_samples:
@@ -441,7 +440,8 @@ class PathPredictor(LightningModule):
                 v = meta.get('v', -1).item() if hasattr(meta.get('v', -1), 'item') else meta.get('v', -1)
                 ts = meta.get('ts', -1).item() if hasattr(meta.get('ts', -1), 'item') else meta.get('ts', -1)
                 v_pos = meta.get('v_pos', v).item() if hasattr(meta.get('v_pos', v), 'item') else meta.get('v_pos', v)
-                
+                length = meta.get('length', 0).item() if hasattr(meta.get('length', 0), 'item') else meta.get('length', 0)
+
                 sample_key = (u, v, ts, v_pos)  # Include v_pos in the key
                 sample_idx = sample_to_idx.get(sample_key, -1)
                 num_path = meta.get('num_paths', 0)
@@ -453,8 +453,8 @@ class PathPredictor(LightningModule):
 
                     # Since prefix_lengths are sorted, this update will be for the longest prefix.
                     # The positive sample's score is at the current cursor position.
-                    score_for_longest_prefix[sample_idx] = prefix_raw_scores_flat[raw_score_cursor]
-                    length_for_longest_prefix[sample_idx] = prefix_len
+                    if length == prefix_len + 1:  # Only consider valid lengths
+                        seq_score[sample_idx] = prefix_raw_scores_flat[raw_score_cursor]
                 
                 # Move cursor to the start of the next sample's scores in the flat tensor
                 raw_score_cursor += num_path
@@ -488,6 +488,8 @@ class PathPredictor(LightningModule):
             v_pos = meta.get('v_pos', v)
             if hasattr(v_pos, 'item'):
                 v_pos = v_pos.item()
+                
+            length = meta['length']
 
             item = {
                 'u': u,
@@ -497,8 +499,8 @@ class PathPredictor(LightningModule):
                 'edge_type': edge_type,
                 'label': labels[i].item(),
                 'loss': -weighted_avg[i],  # Keep as tensor for epoch-end aggregation
-                'score': score_for_longest_prefix[i].item(),
-                'length': length_for_longest_prefix[i].item(),
+                'score': seq_score[i].item(),
+                'length': length,
             }
             batch_items.append(item)
         
