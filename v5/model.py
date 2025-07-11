@@ -4,6 +4,8 @@ import json
 import os
 import math
 from tqdm import tqdm
+import pandas as pd
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -524,25 +526,88 @@ class PathPredictor(LightningModule):
             print(f"Warning: No outputs found in {stage} step. Skipping {stage} epoch end.")
             return
 
-        from collections import defaultdict
-
-        # --- Aggregate all items and losses from outputs ---
-        all_items = []
+        # --- Get paths for logging ---
+        try:
+            epoch = self.trainer.current_epoch
+        except Exception:
+            epoch = "unknown"
+        log_dir = getattr(self.trainer.logger, "save_dir", "logs")
+        if hasattr(self.trainer.logger, "name"):
+            log_dir = os.path.join(log_dir, self.trainer.logger.name)
+        if hasattr(self.trainer.logger, "version"):
+            log_dir = os.path.join(log_dir, str(self.trainer.logger.version))
+        os.makedirs(log_dir, exist_ok=True)
+        test_prefix = "test" if getattr(self.trainer.datamodule, "test_time", False) else "train"
+        
+        # --- Process outputs to collect losses and update edge data ---
         pos_losses = []
         neg_losses = []
+        item_data = {}  # (u, v, v_pos, edge_type, ts, label) -> item
+    
         for output in tqdm(outputs, desc=f"Processing {stage} outputs"):
             if output and 'items' in output:
                 for item in output['items']:
-                    all_items.append(item)
+                    key = (item['u'], item['v'], item['v_pos'], item['edge_type'], item['ts'], item['label'])
+                    item_data[key] = {
+                        'score': item['score'],
+                        'length': item['length']
+                    }
+                    
                     if 'loss' in item and item['loss'] is not None:
                         if item['label'] == 1:
                             pos_losses.append(item['loss'])
                         else:
                             neg_losses.append(item['loss'])
-    
-        if not all_items:
-            print(f"Warning: No items found in {stage} outputs. Skipping evaluation.")
-            return
+
+        # --- Get appropriate dataframe from datamodule based on stage ---
+        try:
+            if stage == 'val':
+                edges_df = self.trainer.datamodule.valid_data.copy()
+                print(f"Using validation dataframe from datamodule with {len(edges_df)} edges")
+            elif stage == 'test':
+                edges_df = self.trainer.datamodule.test_data.copy()
+                print(f"Using test dataframe from datamodule with {len(edges_df)} edges")
+            else:
+                raise ValueError(f"Unknown stage: {stage}")
+        
+            # Reset index to get edge_id as a column
+            edges_df = edges_df.reset_index().rename(columns={'index': 'edge_id'})
+            
+            # Add or update score and length columns
+            edges_df['score'] = 0.0
+            edges_df['length'] = 0
+            
+            # Update rows with collected scores and lengths
+            for i, row in edges_df.iterrows():
+                u = row['u']
+                v = row['v']
+                v_pos = row['v_pos'] if 'v_pos' in row else v
+                edge_type = row['edge_type'] 
+                ts = row['ts']
+                label = row['label']
+                
+                key = (u, v, v_pos, edge_type, ts, label)
+                if key in item_data:
+                    edges_df.at[i, 'score'] = item_data[key]['score']
+                    edges_df.at[i, 'length'] = item_data[key]['length']
+                
+        except (AttributeError, ValueError) as e:
+            print(f"Warning: Could not access datamodule data: {e}. Creating dataframe from output data.")
+            # Create minimal dataframe from collected keys
+            records = []
+            for key, data in item_data.items():
+                u, v, v_pos, edge_type, ts, label = key
+                records.append({
+                    'u': u, 
+                    'v': v,
+                    'v_pos': v_pos, 
+                    'edge_type': edge_type, 
+                    'ts': ts,
+                    'label': label,
+                    'score': data['score'],
+                    'length': data['length']
+                })
+            edges_df = pd.DataFrame(records)
 
         # --- Log epoch-level losses ---
         if pos_losses:
@@ -556,37 +621,19 @@ class PathPredictor(LightningModule):
             self.log(f'{stage}_loss', total_loss, prog_bar=True, on_step=False, on_epoch=True)
             print(f"[{stage.upper()}] Loss: {total_loss:.4f}")
 
-        results, metrics_df = evaluate(all_items, verbose=False)
+        # --- Run evaluation using the DataFrame ---
+        results, metrics_df = evaluate(edges_df, verbose=False)
         for k, v in results.items():
             self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
         print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
 
-        # --- Export raw results to JSON ---
-        try:
-            epoch = self.trainer.current_epoch
-        except Exception:
-            epoch = "unknown"
-        log_dir = getattr(self.trainer.logger, "save_dir", "logs")
-        if hasattr(self.trainer.logger, "name"):
-            log_dir = os.path.join(log_dir, self.trainer.logger.name)
-        if hasattr(self.trainer.logger, "version"):
-            log_dir = os.path.join(log_dir, str(self.trainer.logger.version))
-        os.makedirs(log_dir, exist_ok=True)
-        test_prefix = "test" if getattr(self.trainer.datamodule, "test_time", False) else "train"
-        export_path = os.path.join(log_dir, f"{test_prefix}_{stage}_{epoch}_raw.json")
-
-        export_items = []
-        for item in all_items:
-            export_item = item.copy()
-            if isinstance(export_item.get('loss'), torch.Tensor):
-                export_item['loss'] = export_item['loss'].item()
-            export_items.append(export_item)
-
-        with open(export_path, "w") as f:
-            json.dump(export_items, f, indent=2)
-        print(f"Exported raw evaluation items to {export_path}")
+        # --- Export results ---
+        # Export the scored edges DataFrame to CSV
+        scores_csv_path = os.path.join(log_dir, f"{test_prefix}_{stage}_{epoch}_scores.csv")
+        edges_df.to_csv(scores_csv_path, index=False)
+        print(f"Exported scored edges to {scores_csv_path}")
         
-        # Export metrics_df to CSV file
+        # Export metrics DataFrame to CSV
         metrics_csv_path = os.path.join(log_dir, f"{test_prefix}_{stage}_{epoch}_metrics.csv")
         metrics_df.to_csv(metrics_csv_path, index=False)
         print(f"Exported detailed metrics to {metrics_csv_path}")

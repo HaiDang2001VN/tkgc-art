@@ -429,6 +429,61 @@ class PathDataModule(LightningDataModule):
             dim += emb_dim
         return dim
 
+    @property
+    def train_data(self) -> pd.DataFrame:
+        """train_data df[split] associated with the train phase
+
+        Returns
+        -------
+        pd.DataFrame
+            Returned dataframe of that split
+        """
+        if not self.test_time:
+            if 'train' in self.data:
+                return self.data['train']
+            else:
+                raise ValueError("Train data not set up. Call setup() first.")
+        else:
+            if 'valid' in self.data:
+                return self.data['valid']
+            else:
+                raise ValueError("Validation data not set up. Call setup() first.")
+            
+    @property
+    def valid_data(self) -> pd.DataFrame:
+        """valid_data df[split] associated with the validation phase
+
+        Returns
+        -------
+        pd.DataFrame
+            Returned dataframe of that split
+        """
+        if not self.test_time:
+            if 'valid' in self.data:
+                return self.data['valid']
+            else:
+                raise ValueError("Validation data not set up. Call setup() first.")
+        else:
+            if 'test' in self.data:
+                return self.data['test']
+            else:
+                raise ValueError("Test data not set up. Call setup() first.")
+            
+    @property
+    def test_data(self) -> pd.DataFrame:
+        """test_data df[split] associated with the test phase
+
+        Returns
+        -------
+        pd.DataFrame
+            Returned dataframe of that split
+        """
+        if 'test' in self.data:
+            return self.data['test']
+        else:
+            raise ValueError("Test data not set up. Call setup() first.")
+        
+        
     def prepare_data(self):
         pass
 
