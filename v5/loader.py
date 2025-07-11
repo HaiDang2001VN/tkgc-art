@@ -215,7 +215,7 @@ class EdgeDataset(Dataset):
         else:
             item['length'] = 0
             
-        if length == 5:
+        if item['length'] == 5:
             print("Found max hops")
         
         if pos_nodes is None: # If no positive path, skip this item
