@@ -618,6 +618,11 @@ class PathPredictor(LightningModule):
         with open(export_path, "w") as f:
             json.dump(export_items, f, indent=2)
         print(f"Exported raw evaluation items to {export_path}")
+        
+        # Export metrics_df to CSV file
+        metrics_csv_path = os.path.join(log_dir, f"{test_prefix}_{stage}_{epoch}_metrics.csv")
+        metrics_df.to_csv(metrics_csv_path, index=False)
+        print(f"Exported detailed metrics to {metrics_csv_path}")
     
     def on_validation_epoch_end(self):
         self._on_evaluation_epoch_end(self.validation_step_outputs, 'val')
