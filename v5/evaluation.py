@@ -12,9 +12,9 @@ def calculate_metrics(group):
     A lower 'path_length' is considered a better score.
     """
     true_link = group[group['label'] == 1]
-    if true_link.empty:
+    if true_link.empty or true_link['length'].min() == 0:
         return pd.Series({
-            'rank': 0, 'mrr': 1, 'hits@1': 1, 'hits@3': 1, 'hits@10': 1
+            'rank': 0, 'mrr': 0, 'hits@1': 0, 'hits@3': 0, 'hits@10': 0
         })
 
     # Lower length is better.
@@ -48,7 +48,6 @@ def evaluate(all_items, verbose=True, k_values=[1, 3, 10]):
     metrics = ['rank', 'mrr'] + [f'hits@{k}' for k in k_values]
     overall_metrics = metrics_df[metrics].mean()
 
-    print(df['length'].describe())
     if verbose:
         print("Evaluation Results:")
         print(overall_metrics)
