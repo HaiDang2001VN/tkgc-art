@@ -40,8 +40,9 @@ def calculate_metrics(group):
 
 
 def evaluate(all_items, verbose=True, k_values=[1, 3, 10]):
-    df = pd.DataFrame(all_items).groupby(['u', "v_pos", "edge_type", "ts"])
-    metrics_df = df.apply(calculate_metrics, include_groups=False).reset_index()
+    df = pd.DataFrame(all_items)
+    groups = df.groupby(['u', "v_pos", "edge_type", "ts"])
+    metrics_df = groups.apply(calculate_metrics, include_groups=False).reset_index()
 
     # Calculate overall metrics
     metrics = ['rank', 'mrr'] + [f'hits@{k}' for k in k_values]
