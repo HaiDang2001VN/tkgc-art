@@ -204,6 +204,14 @@ class EdgeDataset(Dataset):
             if pd.notna(v_pos_val) and v_pos_val != "None":
                 item['v_pos'] = torch.tensor(int(v_pos_val), dtype=torch.long)
                 
+        if eid == "776407":
+            print(f"Debugging item for edge {eid}: {item}")
+            # Print pos_path_info
+            print(f"Positive path info: {pos_path_info}")
+            # Print pos_nodes and pos_edge_types
+            print(f"Positive nodes: {pos_nodes}")
+            print(f"Positive edge types: {pos_edge_types}")
+                
         # Item: length of pos path
         if "hops" in pos_path_info:
             item['length'] = pos_path_info["hops"] + 1
