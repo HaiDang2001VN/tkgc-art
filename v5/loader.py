@@ -204,7 +204,7 @@ class EdgeDataset(Dataset):
             if pd.notna(v_pos_val) and v_pos_val != "None":
                 item['v_pos'] = torch.tensor(int(v_pos_val), dtype=torch.long)
                 
-        if eid == "776407":
+        if eid == "776997":
             print(f"Debugging item for edge {eid}: {item}")
             # Print pos_path_info
             print(f"Positive path info: {pos_path_info}")
