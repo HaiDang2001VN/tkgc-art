@@ -711,7 +711,7 @@ class PathDataModule(LightningDataModule):
             valid_edge_ids_int = [int(eid) for eid in valid_edge_ids]
             self.data[split] = self.data[split].loc[valid_edge_ids_int]
             self.pos_paths[split] = {eid: self.pos_paths[split][eid] for eid in valid_edge_ids}
-            self.neg_paths[split] = {eid: self.neg_paths[split][eid] for eid in valid_edge_ids}
+            self.neg_paths[split] = {eid: self.neg_paths[split].get(eid, {}) for eid in valid_edge_ids}
             
             print(f"  New edge count for {split}: {len(self.data[split])}")
         else:
