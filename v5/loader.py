@@ -680,7 +680,7 @@ class PathDataModule(LightningDataModule):
                 result["missing_neg"] = 1
             
             # Check if edge is valid (has both positive and negative paths)
-            if has_valid_pos and has_valid_neg:
+            if has_valid_pos:# and has_valid_neg:
                 result["valid"] = True
                 valid_edge_ids.append(eid)
                 
