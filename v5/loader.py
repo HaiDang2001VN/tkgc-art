@@ -151,7 +151,6 @@ class EdgeDataset(Dataset):
         neg_paths: dict,
         features_map: Union[dict, None],
         kge_proxy: Union[KGEModelProxy, None],
-        num_neg: Union[int, None] = None,
         split: str = None
     ):
         self.df = df
@@ -160,7 +159,6 @@ class EdgeDataset(Dataset):
         self.neg_paths = neg_paths
         self.features_map = features_map
         self.kge_proxy = kge_proxy
-        self.num_neg = num_neg
         self.split = split
 
     def __len__(self):
@@ -366,7 +364,6 @@ class PathDataModule(LightningDataModule):
         self.cfg = cfg
         self.storage_dir = cfg.get('storage_dir', '.')
         self.dataset = cfg['dataset']
-        self.num_neg = cfg.get('num_neg', None)
 
         # --- Adjust num_threads and batch_size if set to 'auto' or 'vast' ---
         num_threads = cfg.get('num_threads', mp.cpu_count())
@@ -610,8 +607,7 @@ class PathDataModule(LightningDataModule):
     def _dataloader(self, split: str, shuffle: bool):
         ds = EdgeDataset(
             self.data[split], self.pos_paths[split], self.neg_paths[split],
-            self.features_map[split], self.kge_proxy[split], num_neg=self.num_neg,
-            split=split
+            self.features_map[split], self.kge_proxy[split], split=split
         )
         
         return DataLoader(

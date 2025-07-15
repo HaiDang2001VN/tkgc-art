@@ -25,7 +25,7 @@ The *config.json* must minimally contain::
       "storage_dir": "./data",         # optional, default: '.'
       "train_ratio": 0.1,              # fraction of earliest train edges
                                        #     to mark as the 'pre' split
-      "neg_per_pos": 1                 # (optional) negatives per positive
+      "num_neg": 1                       # (optional) negatives per positive
     }
 
 Outputs (all under ``storage_dir``):
@@ -123,8 +123,8 @@ def map_position_to_node_id(position: int, sorted_neighbors: list, n_entities: i
 
 def generate_negatives_for_edge(args):
     """Helper function for multiprocessing negative sampling"""
-    head, tail, rel, ts, split_name, head_neighbors, all_entities, neg_per_pos, seed = args
-    
+    head, tail, rel, ts, split_name, head_neighbors, all_entities, num_neg, seed = args
+
     # Create a local random generator with a unique seed derived from the edge and global seed
     local_seed = int(head * 10000 + tail * 100 + seed)
     rng = np.random.default_rng(seed=local_seed)
@@ -139,7 +139,7 @@ def generate_negatives_for_edge(args):
         return []  # Skip if no non-neighbors available
     
     # Sample positions in the non-neighbor space
-    sample_size = min(num_non_neighbors, neg_per_pos)
+    sample_size = min(num_non_neighbors, num_neg)
     positions = rng.choice(num_non_neighbors, size=sample_size, replace=False)
     
     # Convert neighbor set to sorted list for efficient gap traversal
@@ -183,7 +183,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     # configuration knobs ----------------------------------------------------------------
     train_ratio = float(configuration.get(
         "train_ratio", 0.0))  # 0.0 → all 'train'
-    neg_per_pos = int(configuration.get("neg_per_pos", 1))
+    num_neg = int(configuration.get("num_neg", 1))
     split_code = {"pre": 0, "train": 1, "valid": 2, "test": 3}
     add_inverse_edges = configuration.get("add_inverse_edges", True)  # Control whether to add inverse edges
 
@@ -315,7 +315,7 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
     # ----------------------------------------------------------------------
     # second pass: generate negatives using global neighbor information
     # ----------------------------------------------------------------------
-    if neg_per_pos > 0:
+    if num_neg > 0:
         seed = 42  # Global random seed
         all_entities = np.arange(len(node_map), dtype=np.int64) # Use mapped entities
         
@@ -328,8 +328,8 @@ def process_quad_dataset(configuration: Dict) -> pd.DataFrame:
             
             # Prepare arguments for multiprocessing (uses transformed IDs)
             mp_args = [(head, tail, rel, ts, split_name, neighbor_dict.get(head, set()),
-                        all_entities, neg_per_pos, seed) for head, tail, rel, ts, split_name in pos_edges]
-            
+                        all_entities, num_neg, seed) for head, tail, rel, ts, split_name in pos_edges]
+
             # Use multiprocessing to generate negatives in parallel
             with mp.Pool(processes=num_workers) as pool:
                 neg_results = list(tqdm(
