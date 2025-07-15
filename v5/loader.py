@@ -46,10 +46,12 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
         # Process each sample
         for item in batch:
             eid = item.get('eid', None)
+            if eid == 349288:
+                print(f"Processing item for eid 349288 with prefix length {prefix_len}: {item['length']}")
+                print("No pos node embs found")
             
             if 'pos_node_embs' not in item:
                 if eid == 349288:
-                    print(f"Processing item for eid 349288 with prefix length {prefix_len}: {item['length']}")
                     print("No pos node embs found")
                 continue
             
@@ -65,6 +67,8 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
                     pos_node_embs = pos_node_embs[:prefix_len + 1]
                 elif length < (prefix_len + 1):
                     # If positive path shorter meaning no negative paths, we can skip this sample
+                    if eid == 349288:
+                        print("Skipping sample with eid 349288 due to shorter positive path than prefix length")
                     continue
 
             if pos_edge_embs is not None:
@@ -73,6 +77,8 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
                     pos_edge_embs = pos_edge_embs[:prefix_len]
                 elif pos_edge_embs.size(0) < prefix_len:
                     # If positive path edges shorter meaning no negative paths, we can skip this sample
+                    if eid == 349288:
+                        print("Skipping sample with eid 349288 due to shorter positive path than prefix length")
                     continue
 
             # Get negative path embeddings for this prefix length
@@ -217,16 +223,20 @@ class EdgeDataset(Dataset):
             # Print pos_nodes and pos_edge_types
             print(f"Positive nodes: {pos_nodes}")
             print(f"Positive edge types: {pos_edge_types}")
-                
-        # Item: length of pos path
-        if "hops" in pos_path_info:
-            item['length'] = pos_path_info["hops"] + 1
-            assert item['length'] == len(pos_nodes), "Length mismatch between hops and nodes in positive path"
-        elif pos_nodes is not None and len(pos_nodes) > 0:
-            item['length'] = len(pos_nodes)
-        else:
-            item['length'] = 0
             
+        # Get length directly from dataframe instead of recalculating
+        if 'length' in self.df.columns:
+            item['length'] = int(self.df.at[eid, 'length'])
+        else:
+            # Fallback to original calculation if length column doesn't exist
+            if "hops" in pos_path_info:
+                item['length'] = pos_path_info["hops"] + 1
+                assert item['length'] == len(pos_nodes), "Length mismatch between hops and nodes in positive path"
+            elif pos_nodes is not None and len(pos_nodes) > 0:
+                item['length'] = len(pos_nodes)
+            else:
+                item['length'] = 0
+        
         if pos_nodes is None: # If no positive path, skip this item
             return item # Still returns the label in order for later evaluation if needed
         
@@ -513,6 +523,8 @@ class PathDataModule(LightningDataModule):
                 print(f"Setting up data for split: {split}")
                 
                 self.data[split] = self.df[self.df['split'] == split_code[split]].copy()
+                # Initialize the length column with zeros
+                self.data[split]['length'] = 0
 
                 pos_paths = {}
                 with open(os.path.join(self.storage_dir, f"{self.cfg['dataset']}_paths.txt")) as f:
@@ -539,6 +551,13 @@ class PathDataModule(LightningDataModule):
                                 "edge_types": edge_types,
                                 "edge_timestamps": edge_timestamps
                             }
+                            # Store length (hops + 1) in the dataframe
+                            try:
+                                int_eid = int(eid)
+                                if int_eid in self.data[split].index:
+                                    self.data[split].at[int_eid, 'length'] = hops + 1
+                            except (ValueError, KeyError) as e:
+                                print(f"Warning: Could not update length for eid {eid}: {e}")
 
                 self.pos_paths[split] = pos_paths
                 neg_fn = os.path.join(self.storage_dir, f"{self.cfg.get('model_name','transe')}_{self.dataset}_{split}_neg.json")
