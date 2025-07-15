@@ -100,15 +100,19 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             all_node_embs.extend(sample_node_embs)
             all_edge_embs.extend(sample_edge_embs)
             
+            eid = item.get('edge_id', None)
+            if eid == 349288:
+                print("Collating sample for eid 349288, pos_node_embs:", len(pos_node_embs), "neg_node_embs:", [len(neg_emb) for neg_emb in neg_node_embs], "prefix_len:", prefix_len, "length:", length)  # noqa: E501length
+
             # Create metadata entry for this sample with the adjusted path length
             # Since pos_node_embs is already trimmed, we can directly use its length
             meta = {
                 'num_paths': len(sample_node_embs),
-                'length': length
+                'length': length,
             }
             
             # Add edge information to metadata
-            for key in ['label', 'u', 'v', 'ts', 'edge_type', 'type_embedding', 'v_pos']:
+            for key in ['label', 'u', 'v', 'ts', 'edge_type', 'type_embedding', 'v_pos', 'eid']:
                 if key in item:
                     meta[key] = item[key]
             
@@ -174,7 +178,7 @@ class EdgeDataset(Dataset):
         pos_edge_types = pos_path_info.get('edge_types', [])
         pos_edge_timestamps = pos_path_info.get('edge_timestamps', [])
         
-        item = {}
+        item = {'eid': eid}
         # Create label tensor on CPU
         item['label'] = torch.tensor(label, dtype=torch.long)  # CPU default
         

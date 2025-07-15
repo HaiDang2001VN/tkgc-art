@@ -175,6 +175,11 @@ class PathPredictor(LightningModule):
                 sample_key = (u, v, ts)
                 length = sample_meta.get('length', 0).item() if hasattr(sample_meta.get('length', 0), 'item') else sample_meta.get('length', 0)
                 
+                eid = sample_meta.get('eid', None)
+                if eid == 349288:
+                    print(f"Perform prediction for eid 349288: {sample_meta}")
+                    print(f"Prefix length: {prefix_len}, Length: {length}, Sample key: {sample_key}")
+                
                 if 'v_pos' not in sample_meta:
                     raise ValueError("Metadata must include 'v_pos' for new prediction format.")
                 
