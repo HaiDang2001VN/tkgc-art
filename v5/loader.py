@@ -46,6 +46,9 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
         # Process each sample
         for item in batch:
             if 'pos_node_embs' not in item:
+                if eid == 349288:
+                    print(f"Processing item for eid 349288 with prefix length {prefix_len}: {item['length']}")
+                    print("No pos node embs found")
                 continue
             
             # Get positive path embeddings and trim them to match the prefix length
