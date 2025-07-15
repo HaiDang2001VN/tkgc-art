@@ -45,6 +45,8 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
         
         # Process each sample
         for item in batch:
+            eid = item.get('eid', None)
+            
             if 'pos_node_embs' not in item:
                 if eid == 349288:
                     print(f"Processing item for eid 349288 with prefix length {prefix_len}: {item['length']}")
@@ -103,7 +105,6 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             all_node_embs.extend(sample_node_embs)
             all_edge_embs.extend(sample_edge_embs)
             
-            eid = item.get('eid', None)
             if eid == 349288:
                 print("Collating sample for eid 349288, pos_node_embs:", len(pos_node_embs), "neg_node_embs:", [len(neg_emb) for neg_emb in neg_node_embs], "prefix_len:", prefix_len, "length:", length)  # noqa: E501length
 
