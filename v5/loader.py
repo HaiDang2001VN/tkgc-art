@@ -46,13 +46,13 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
         # Process each sample
         for item in batch:
             eid = item.get('eid', None)
-            if eid == 349288:
-                print(f"Processing item for eid 349288 with prefix length {prefix_len}: {item['length']}")
-                print("No pos node embs found")
+            # if eid == 349288:
+            #     print(f"Processing item for eid 349288 with prefix length {prefix_len}: {item['length']}")
+            #     print("No pos node embs found")
             
             if 'pos_node_embs' not in item:
-                if eid == 349288:
-                    print("No pos node embs found")
+                # if eid == 349288:
+                #     print("No pos node embs found")
                 continue
             
             # Get positive path embeddings and trim them to match the prefix length
@@ -67,8 +67,8 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
                     pos_node_embs = pos_node_embs[:prefix_len + 1]
                 elif length < (prefix_len + 1):
                     # If positive path shorter meaning no negative paths, we can skip this sample
-                    if eid == 349288:
-                        print("Skipping sample with eid 349288 due to shorter positive path than prefix length")
+                    # if eid == 349288:
+                    #     print("Skipping sample with eid 349288 due to shorter positive path than prefix length")
                     continue
 
             if pos_edge_embs is not None:
@@ -77,8 +77,8 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
                     pos_edge_embs = pos_edge_embs[:prefix_len]
                 elif pos_edge_embs.size(0) < prefix_len:
                     # If positive path edges shorter meaning no negative paths, we can skip this sample
-                    if eid == 349288:
-                        print("Skipping sample with eid 349288 due to shorter positive path than prefix length")
+                    # if eid == 349288:
+                    #     print("Skipping sample with eid 349288 due to shorter positive path than prefix length")
                     continue
 
             # Get negative path embeddings for this prefix length
@@ -111,8 +111,8 @@ def collate_by_prefix_length(batch: list[dict]) -> dict:
             all_node_embs.extend(sample_node_embs)
             all_edge_embs.extend(sample_edge_embs)
             
-            if eid == 349288:
-                print("Collating sample for eid 349288, pos_node_embs:", len(pos_node_embs), "neg_node_embs:", [len(neg_emb) for neg_emb in neg_node_embs], "prefix_len:", prefix_len, "length:", length)  # noqa: E501length
+            # if eid == 349288:
+            #     print("Collating sample for eid 349288, pos_node_embs:", len(pos_node_embs), "neg_node_embs:", [len(neg_emb) for neg_emb in neg_node_embs], "prefix_len:", prefix_len, "length:", length)  # noqa: E501length
 
             # Create metadata entry for this sample with the adjusted path length
             # Since pos_node_embs is already trimmed, we can directly use its length
@@ -216,13 +216,13 @@ class EdgeDataset(Dataset):
             if pd.notna(v_pos_val) and v_pos_val != "None":
                 item['v_pos'] = torch.tensor(int(v_pos_val), dtype=torch.long)
                 
-        if eid == 349288:
-            print(f"Debugging item for edge {eid}: {item}")
-            # Print pos_path_info
-            print(f"Positive path info: {pos_path_info}")
-            # Print pos_nodes and pos_edge_types
-            print(f"Positive nodes: {pos_nodes}")
-            print(f"Positive edge types: {pos_edge_types}")
+        # if eid == 349288:
+        #     print(f"Debugging item for edge {eid}: {item}")
+        #     # Print pos_path_info
+        #     print(f"Positive path info: {pos_path_info}")
+        #     # Print pos_nodes and pos_edge_types
+        #     print(f"Positive nodes: {pos_nodes}")
+        #     print(f"Positive edge types: {pos_edge_types}")
             
         # Get length directly from dataframe instead of recalculating
         if 'length' in self.df.columns:
