@@ -12,18 +12,28 @@ def calculate_metrics(group):
     A lower 'path_length' is considered a better score.
     """
     true_link = group[group['label'] == 1]
-    if true_link.empty or true_link['length'].min() == 0:
+    if true_link.empty or (true_link['length'].min() == 0):
+        min_neg = 0 if group.loc[group['label']
+                                 == 1, 'length'].min() > 0 else 1
         return pd.Series({
-            'rank': 0, 'mrr': 0, 'hits@1': 0, 'hits@3': 0, 'hits@10': 0
+            'rank': min_neg-1, 'mrr': min_neg, 'hits@1': min_neg, 'hits@3': min_neg, 'hits@10': min_neg
         })
 
-    # Lower length is better.
-    true_path_length = true_link['length'].min()
+    # # Lower length is better.
+    # true_length = true_link['length'].min()
 
-    # Rank is 1 + number of negative samples with a better (smaller) or equal length.
+    # # Rank is 1 + number of negative samples with a better (smaller) or equal length.
+    # # We use '<=' because if scores are tied, the true link does not get the best rank.
+    # rank = 1 + group[(group['label'] == 0) &
+    #                  (group['length'] < true_length)].shape[0]
+    
+    # Score-based comparison
+    true_score = true_link['score'].mean()
+
+    # Rank is 1 + number of negative samples with a better (smaller) or equal score.
     # We use '<=' because if scores are tied, the true link does not get the best rank.
     rank = 1 + group[(group['label'] == 0) &
-                     (group['length'] < true_path_length)].shape[0]
+                     (group['score'] < true_score)].shape[0]
 
     mrr = 1.0 / rank
     hits_at_1 = 1.0 if rank <= 1 else 0.0
