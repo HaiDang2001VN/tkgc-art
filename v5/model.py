@@ -564,65 +564,65 @@ class PathPredictor(LightningModule):
                         else:
                             neg_losses.append(item['loss'])
 
-    # --- Get appropriate dataframe from datamodule based on stage ---
-    try:
-        if stage == 'val':
-            edges_df = self.trainer.datamodule.valid_data.copy()
-            print(f"Using validation dataframe from datamodule with {len(edges_df)} edges")
-        elif stage == 'test':
-            edges_df = self.trainer.datamodule.test_data.copy()
-            print(f"Using test dataframe from datamodule with {len(edges_df)} edges")
-        else:
-            raise ValueError(f"Unknown stage: {stage}")
-        
-        # Reset index to get edge_id as a column
-        edges_df = edges_df.reset_index().rename(columns={'index': 'edge_id'})
-        
-        # Add or update score column only, keep original length
-        edges_df['score'] = 0.0
-        
-        # Update rows with collected scores only (not lengths)
-        for i, row in edges_df.iterrows():
-            u = row['u']
-            v = row['v']
-            v_pos = row['v_pos'] if 'v_pos' in row else v
-            edge_type = row['edge_type'] 
-            ts = row['ts']
-            label = row['label']
+        # --- Get appropriate dataframe from datamodule based on stage ---
+        try:
+            if stage == 'val':
+                edges_df = self.trainer.datamodule.valid_data.copy()
+                print(f"Using validation dataframe from datamodule with {len(edges_df)} edges")
+            elif stage == 'test':
+                edges_df = self.trainer.datamodule.test_data.copy()
+                print(f"Using test dataframe from datamodule with {len(edges_df)} edges")
+            else:
+                raise ValueError(f"Unknown stage: {stage}")
             
-            key = (u, v, v_pos, edge_type, ts, label)
-            if key in item_data:
-                edges_df.at[i, 'score'] = item_data[key]['score']
-                # Don't update length, use the existing one from dataframe
+            # Reset index to get edge_id as a column
+            edges_df = edges_df.reset_index().rename(columns={'index': 'edge_id'})
+            
+            # Add or update score column only, keep original length
+            edges_df['score'] = 0.0
+            
+            # Update rows with collected scores only (not lengths)
+            for i, row in edges_df.iterrows():
+                u = row['u']
+                v = row['v']
+                v_pos = row['v_pos'] if 'v_pos' in row else v
+                edge_type = row['edge_type'] 
+                ts = row['ts']
+                label = row['label']
                 
-    except (AttributeError, ValueError) as e:
-        print(f"Warning: Could not access datamodule data: {e}. Creating dataframe from output data.")
-        # Create minimal dataframe from collected keys - in this case we have to reconstruct length from outputs
-        records = []
-        for key, data in item_data.items():
-            u, v, v_pos, edge_type, ts, label = key
-            # Try to get length from the batch items first
-            length = None
-            for output in outputs:
-                if output and 'items' in output:
-                    for item in output['items']:
-                        if (item['u'], item['v'], item['v_pos'], item['edge_type'], item['ts'], item['label']) == key:
-                            length = item['length']
+                key = (u, v, v_pos, edge_type, ts, label)
+                if key in item_data:
+                    edges_df.at[i, 'score'] = item_data[key]['score']
+                    # Don't update length, use the existing one from dataframe
+                    
+        except (AttributeError, ValueError) as e:
+            print(f"Warning: Could not access datamodule data: {e}. Creating dataframe from output data.")
+            # Create minimal dataframe from collected keys - in this case we have to reconstruct length from outputs
+            records = []
+            for key, data in item_data.items():
+                u, v, v_pos, edge_type, ts, label = key
+                # Try to get length from the batch items first
+                length = None
+                for output in outputs:
+                    if output and 'items' in output:
+                        for item in output['items']:
+                            if (item['u'], item['v'], item['v_pos'], item['edge_type'], item['ts'], item['label']) == key:
+                                length = item['length']
+                                break
+                        if length is not None:
                             break
-                    if length is not None:
-                        break
-            
-            records.append({
-                'u': u, 
-                'v': v,
-                'v_pos': v_pos, 
-                'edge_type': edge_type, 
-                'ts': ts,
-                'label': label,
-                'score': data['score'],
-                'length': length if length is not None else 0  # Fallback to 0 if length not found
-            })
-        edges_df = pd.DataFrame(records)
+                
+                records.append({
+                    'u': u, 
+                    'v': v,
+                    'v_pos': v_pos, 
+                    'edge_type': edge_type, 
+                    'ts': ts,
+                    'label': label,
+                    'score': data['score'],
+                    'length': length if length is not None else 0  # Fallback to 0 if length not found
+                })
+            edges_df = pd.DataFrame(records)
 
         # --- Log epoch-level losses ---
         if pos_losses:
