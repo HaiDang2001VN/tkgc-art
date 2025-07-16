@@ -640,7 +640,7 @@ class PathPredictor(LightningModule):
         results, metrics_df = evaluate(edges_df, verbose=False)
         for k, v in results.items():
             self.log(f'{stage}_{k}', v, on_step=False, on_epoch=True)
-        print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
+        print(f"[{stage.upper()}] MRR: {results.get('mrr', 0):.4f}, Hits@1: {results.get('hits@1', 0):.4f}, Hits@3: {results.get('hits@3', 0):.4f}, Hits@10: {results.get('hits@10', 0):.4f}")
 
         # --- Export results ---
         # Export the scored edges DataFrame to CSV
