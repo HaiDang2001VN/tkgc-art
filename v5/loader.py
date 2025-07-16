@@ -176,7 +176,7 @@ class EdgeDataset(Dataset):
         self.split = split
 
     def __len__(self):
-        return len(self.edge_ids) if self.split != 'train' else 100  # For testing purposes, limit to 100 items in train split
+        return len(self.edge_ids)# if self.split != 'train' else 100  # For testing purposes, limit to 100 items in train split
 
     def __getitem__(self, idx):
         eid = self.edge_ids[idx]
