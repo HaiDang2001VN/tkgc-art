@@ -6,3 +6,4 @@ pip install -r requirements.txt
 pip install -r requirements_geometric.txt
 g++ -std=c++23 -O3 -pthread -o prepare.o prepare.cpp
 g++ -std=c++23 -O3 -pthread -o preprocess.o preprocess.cpp
+python benchmark_prepare.py --dataset icews14 --num_threads ? --config config_score.json
