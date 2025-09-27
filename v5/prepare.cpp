@@ -169,6 +169,7 @@ int main(int argc, char **argv)
     int cur_ts = rows.empty() ? 0 : rows.back().ts; 
     vector<Row> buffer;
     int paths_found_count = 0; // Counter for paths found
+    int query_edges_count = 0;  // Counter for edges evaluated by this thread
 
     auto flush_buffer = [&]()
     {
@@ -205,6 +206,7 @@ int main(int argc, char **argv)
         bool do_query = (r.split != "pre") && (r.edge_id % num_threads == thread_id);
         if (do_query)
         {
+            query_edges_count++;
             int src_id = r.u; 
             int dst_id = r.v; 
 
@@ -383,6 +385,15 @@ int main(int argc, char **argv)
     }
     flush_buffer();
     log_stream << "[Info] " << getCurrentTimestamp() << " BFS processing finished." << endl;
+
+    double coverage_ratio = (query_edges_count > 0)
+                                ? static_cast<double>(paths_found_count) / static_cast<double>(query_edges_count)
+                                : 0.0;
+    log_stream << "[Info] " << getCurrentTimestamp() << " Path coverage: "
+               << paths_found_count << "/" << query_edges_count
+               << " (" << std::fixed << std::setprecision(4) << coverage_ratio << ")" << endl;
+
+    cout << "SUMMARY|" << thread_id << "|" << paths_found_count << "|" << query_edges_count << "\n";
 
     // // Go back and write the actual total paths count
     // long end_pos = cout.tellp();

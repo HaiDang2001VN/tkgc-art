@@ -1,9 +1,4 @@
-git clone https://github.com/HaiDang2001VN/tkgc-art.git src
-git clone https://github.com/stmrdus/TKGC-Benchmark-Datasets.git dataset
-mv dataset/Unified_Datasets src/data
-cd src/v5
-pip install -r requirements.txt
-pip install -r requirements_geometric.txt
-g++ -std=c++23 -O3 -pthread -o prepare.o prepare.cpp
-g++ -std=c++23 -O3 -pthread -o preprocess.o preprocess.cpp
-python benchmark_prepare.py --dataset icews14 --num_threads ? --config config_score.json
+python benchmark_prepare.py --dataset icews14 --num_threads 14 --config config_score.json --output_dir ../data/benchmark/bench
+python benchmark_prepare.py --dataset yago --num_threads 14 --config config_score.json --output_dir ../data/benchmark/bench
+python benchmark_prepare.py --dataset icews05-15 --num_threads 14 --config config_score.json --output_dir ../data/benchmark/bench
+python benchmark_prepare.py --dataset wiki --num_threads 14 --config config_score.json --output_dir ../data/benchmark/bench

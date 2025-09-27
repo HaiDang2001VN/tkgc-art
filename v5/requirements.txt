@@ -8,3 +8,4 @@ lightning
 wandb
 matplotlib
 seaborn
+psutil

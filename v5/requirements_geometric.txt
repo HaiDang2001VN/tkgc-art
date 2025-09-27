@@ -1,2 +1,2 @@
 --extra-index-url https://data.pyg.org/whl/torch-2.4.0+cu124.html
-torch-geometric
+pyg_lib

@@ -1,6 +1,7 @@
 import os
 import subprocess
 import argparse
+import json
 from tqdm import tqdm
 from multiprocessing import Pool
 from utils import load_configuration
@@ -15,10 +16,22 @@ def run_thread(args):
     cmd = [binary, csv, str(max_hops), str(tid), str(nthreads), str(decay_factor), str(max_fanout)]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
     results = {}
+    summary_paths_found = 0
+    summary_edges_total = 0
 
     for line in proc.stdout:
         line = line.strip()
         if not line:
+            continue
+
+        if line.rfind("SUMMARY|", 0) == 0:
+            parts = line.split("|")
+            if len(parts) >= 4:
+                try:
+                    summary_paths_found = int(parts[2])
+                    summary_edges_total = int(parts[3])
+                except ValueError:
+                    pass
             continue
 
         parts = line.split(";")
@@ -49,7 +62,13 @@ def run_thread(args):
         }
 
     proc.wait()
-    return results
+
+    if summary_paths_found == 0 and results:
+        summary_paths_found = len(results)
+    if summary_edges_total == 0:
+        summary_edges_total = summary_paths_found
+
+    return tid, results, summary_paths_found, summary_edges_total
 
 
 def write_paths_text_file(final_map, output_path):
@@ -122,7 +141,7 @@ def main():
 
     # Run in parallel
     with Pool(run_threads) as pool:
-        thread_maps = list(tqdm(
+        thread_results = list(tqdm(
             pool.imap(run_thread, tasks),
             total=len(tasks),
             desc="Processing threads"
@@ -131,9 +150,28 @@ def main():
     # Collate all results
     final_map = {}
     total_paths = 0
-    for tm in thread_maps:
-        final_map.update(tm)
-        total_paths += len(tm)
+    total_evaluated_edges = 0
+    per_thread_logs = []
+
+    for idx, result in enumerate(thread_results):
+        tid, thread_map, paths_found, edges_total = result
+
+        final_map.update(thread_map)
+        total_paths += len(thread_map)
+
+        if paths_found == 0 and thread_map:
+            paths_found = len(thread_map)
+        if edges_total == 0:
+            edges_total = max(paths_found, len(thread_map))
+
+        total_evaluated_edges += edges_total
+
+        per_thread_logs.append({
+            "thread_id": tid,
+            "paths_found": paths_found,
+            "edges_evaluated": edges_total,
+            "coverage_ratio": (paths_found / edges_total) if edges_total else 0.0,
+        })
 
     print(f"Collected {total_paths} shortest paths from all threads")
 
@@ -144,6 +182,38 @@ def main():
     write_paths_text_file(final_map, out_file)
 
     print(f"Successfully saved {len(final_map)} shortest paths to {out_file}")
+
+    paths_found_total = sum(entry["paths_found"] for entry in per_thread_logs)
+    total_edges_evaluated = total_evaluated_edges
+    coverage_ratio = (paths_found_total / total_edges_evaluated) if total_edges_evaluated else 0.0
+
+    summary_payload = {
+        "dataset": config["dataset"],
+        "paths_found": paths_found_total,
+        "edges_evaluated": total_edges_evaluated,
+        "coverage_ratio": coverage_ratio,
+        "per_thread": per_thread_logs,
+    }
+
+    summary_json_path = os.path.join(data_dir, f"{config['dataset']}_prepare_summary.json")
+    with open(summary_json_path, "w") as summary_file:
+        json.dump(summary_payload, summary_file, indent=2)
+
+    summary_log_path = os.path.join(data_dir, f"{config['dataset']}_prepare_summary.log")
+    with open(summary_log_path, "w") as summary_log:
+        summary_log.write("ThreadID\tPathsFound\tEdgesEvaluated\tCoverageRatio\n")
+        for entry in per_thread_logs:
+            summary_log.write(
+                f"{entry['thread_id']}\t{entry['paths_found']}\t{entry['edges_evaluated']}\t{entry['coverage_ratio']:.4f}\n"
+            )
+        summary_log.write(
+            f"TOTAL\t{paths_found_total}\t{total_edges_evaluated}\t{coverage_ratio:.4f}\n"
+        )
+
+    print(
+        f"Coverage summary: {paths_found_total}/{total_edges_evaluated} "
+        f"({coverage_ratio * 100:.2f}%); saved to {summary_json_path}"
+    )
 
     # Print sample of the output format for verification
     if final_map:
